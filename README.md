@@ -1,8 +1,11 @@
 # AgentMark
 
-**Motivation.** When you and an agent iterate on markdown, you need a quick way to leave feedback that stays tied to the text—not another long paste into chat. AgentMark gives you anchored comment threads on the document so humans can steer and agents can respond with concrete edits.
+**Motivation.** When you and an agent iterate on markdown, you need feedback tied to exact passages, not scattered chat context. AgentMark gives you anchored threads so humans can steer edits and agents can respond precisely.
 
-**Collaboration.** You work in the review UI (or your IDE integration): add comments on passages, keep threads open until the wording matches intent, then resolve them. Agents can follow the same threads from **Copy review context** or via the `comments` CLI against the file on disk.
+**Core principles.**
+- **System of record, not runner.** AgentMark owns review data; execution loops (daemon/chat/session orchestration) stay outside.
+- **LLM-agnostic workflow.** Teams can use any LLM tool to work through content while keeping comments, anchors, and history in one place.
+- **Explicit state ownership.** Server truth: document, threads, timestamps, detached/resolved state. Client truth: personal read/unread cursors in browser storage. External truth: automation lifecycle health.
 
 **History without git noise.** Drafts change constantly; you do not want every iteration as a commit. AgentMark records automatic snapshots of the file (outside the repo) so you can step through versions, diff, and recover wording without treating git as a scratch pad.
 
@@ -16,6 +19,7 @@
    ```
 
    Optional: `--port 4173` (default), `--no-open` to skip opening a browser tab.
+   Discover flags and subcommands with `./wagentmark --help`.
 
 3. **Use the UI** — read the preview, add comments anchored to the text, browse **History** to compare snapshots or pull back earlier wording.
 
@@ -37,6 +41,7 @@ The first argument to the binary is always the markdown file or directory to ser
 
 # Reply and resolve
 ./wagentmark comments reply ./README.md --thread <id> --body "Updated in latest edit" --role agent
+# Default policy: humans resolve threads unless they explicitly ask an agent to do it.
 ./wagentmark comments resolve ./README.md --thread <id>
 
 # After an agent edit, list detached threads and re-point one at new text (same thread id)
@@ -45,15 +50,18 @@ The first argument to the binary is always the markdown file or directory to ser
 
 # Save a named snapshot
 ./wagentmark snapshot save ./README.md --label "after polish pass"
+
+# Combine optional flags (for remote/headless usage)
+./wagentmark --port 8080 --no-open ./docs/
 ```
-
-## IDE workflow
-
-Run AgentMark from your IDE (Cursor, Zed, VSCode), then use **Copy review context** to paste open review threads into chat. Each thread line includes a stable **id** so agents can preserve or re-attach anchors after edits. Threads that fall off the document appear under **detached** in the UI and in a `[DETACHED]` section in the copied context; use **Re-attach** (select new text) or `comments reattach` to link them again.
 
 ## Where data lives
 
-Comment sidecars and snapshot paths are described in [docs/storage-and-history.md](docs/storage-and-history.md).
+AgentMark stores review state outside your document content:
+- Comment threads in sidecar files next to markdown docs.
+- Snapshot history in OS app data storage (outside your git repo).
+
+See [docs/storage-and-history.md](docs/storage-and-history.md) for exact paths, formats, and retention details.
 
 ## Development
 
@@ -68,3 +76,4 @@ In this repository, `./wagentmark` is a thin wrapper around `go run .` for the s
 
 - Go 1.22+ (`net/http`, `chi`, `fsnotify`, `gorilla/websocket`)
 - Alpine.js + `marked` (CDN) in embedded static assets
+  - CDN assets are version-pinned; restricted/offline environments may require mirroring or local vendoring.

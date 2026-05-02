@@ -99,3 +99,38 @@ func TestReanchorThreadsWithStore_snapshotBasisHash(t *testing.T) {
 		t.Fatalf("anchor: %q", out[0].AnchorText)
 	}
 }
+
+func TestReanchorThreadsWithStore_dedupesSameIDPrefersAttached(t *testing.T) {
+	md := "# Doc\n\nAnchor text\n"
+	threads := []CommentThread{
+		{
+			ID:         "dup-1",
+			AnchorText: "missing text",
+			Detached:   true,
+			Thread: []CommentMessage{
+				{Role: "agent", Body: "first", TS: 1},
+			},
+		},
+		{
+			ID:         "dup-1",
+			AnchorText: "Anchor text",
+			Thread: []CommentMessage{
+				{Role: "agent", Body: "second", TS: 2},
+			},
+		},
+	}
+
+	out := ReanchorThreadsWithStore(md, threads, nil)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 deduped thread, got %d", len(out))
+	}
+	if out[0].ID != "dup-1" {
+		t.Fatalf("unexpected id %q", out[0].ID)
+	}
+	if out[0].Detached {
+		t.Fatalf("expected attached canonical thread, got detached: %+v", out[0])
+	}
+	if out[0].AnchorText != "Anchor text" {
+		t.Fatalf("expected canonical anchor text, got %q", out[0].AnchorText)
+	}
+}

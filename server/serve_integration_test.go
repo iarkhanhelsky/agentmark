@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 func TestIntegrationServeCoreAPI(t *testing.T) {
@@ -46,6 +49,29 @@ func TestIntegrationServeCoreAPI(t *testing.T) {
 	}()
 
 	waitForReady(t, baseURL)
+	resp, err := http.Get(baseURL + "/")
+	if err != nil {
+		t.Fatalf("get /: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get / status=%d body=%s", resp.StatusCode, string(body))
+	}
+	host, _ := os.Hostname()
+	if strings.TrimSpace(host) == "" {
+		host = "localhost"
+	}
+	wantServerID := html.EscapeString(host + ":" + root)
+	if !strings.Contains(string(body), `meta name="agentmark-server-id"`) {
+		t.Fatalf("index missing agentmark-server-id meta: %s", string(body))
+	}
+	if !strings.Contains(string(body), `content="`+wantServerID+`"`) {
+		t.Fatalf("index meta content mismatch, want content=%q", wantServerID)
+	}
+	if strings.Contains(string(body), "Copy context") {
+		t.Fatalf("index should not include removed Copy context action")
+	}
 
 	meta := getJSONMap(t, baseURL+"/api/file-meta")
 	if got := meta["name"]; got != "README.md" {
@@ -198,5 +224,320 @@ func TestIntegrationServeStartupShutdown(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("server did not stop on cancel")
+	}
+}
+
+func TestIntegrationServePushesThreadsUpdateOnExternalSidecarWrite(t *testing.T) {
+	t.Setenv("AGENTMARK_DATA_DIR", t.TempDir())
+	root := t.TempDir()
+	file := filepath.Join(root, "doc.md")
+	if err := os.WriteFile(file, []byte("# Doc\n\nBody\n"), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+	port := freeTCPPort(t)
+	baseURL := fmt.Sprintf("http://127.0.0.1:%s", port)
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%s/ws", port)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Start(ctx, Config{FilePath: file, Port: port})
+	}()
+	waitForReady(t, baseURL)
+
+	c, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	defer c.Close()
+	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+
+	for i := 0; i < 3; i++ {
+		if _, _, err := c.ReadMessage(); err != nil {
+			t.Fatalf("read bootstrap ws message: %v", err)
+		}
+	}
+
+	threads := []CommentThread{
+		{
+			ID:         "ext-1",
+			AnchorText: "Body",
+			Thread: []CommentMessage{
+				{Role: "agent", Body: "External write", TS: time.Now().UnixMilli()},
+			},
+		},
+	}
+	if err := SaveThreads(file, threads); err != nil {
+		t.Fatalf("save external sidecar: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	found := false
+	for time.Now().Before(deadline) {
+		_ = c.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		_, b, err := c.ReadMessage()
+		if err != nil {
+			continue
+		}
+		var ev WSEvent
+		if err := json.Unmarshal(b, &ev); err != nil {
+			continue
+		}
+		if ev.Type != "threads_update" {
+			continue
+		}
+		for _, t := range ev.Threads {
+			if t.ID == "ext-1" {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	if !found {
+		t.Fatal("did not receive threads_update for external sidecar write")
+	}
+}
+
+func TestIntegrationServeWSBootstrapLoadsLatestSidecar(t *testing.T) {
+	t.Setenv("AGENTMARK_DATA_DIR", t.TempDir())
+	root := t.TempDir()
+	file := filepath.Join(root, "doc.md")
+	if err := os.WriteFile(file, []byte("# Doc\n\nBody\n"), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+	port := freeTCPPort(t)
+	baseURL := fmt.Sprintf("http://127.0.0.1:%s", port)
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%s/ws", port)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Start(ctx, Config{FilePath: file, Port: port})
+	}()
+	waitForReady(t, baseURL)
+
+	threads := []CommentThread{
+		{
+			ID:         "bootstrap-1",
+			AnchorText: "Body",
+			Thread: []CommentMessage{
+				{Role: "agent", Body: "Latest from sidecar", TS: time.Now().UnixMilli()},
+			},
+		},
+	}
+	if err := SaveThreads(file, threads); err != nil {
+		t.Fatalf("save sidecar: %v", err)
+	}
+
+	c, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	defer c.Close()
+	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+
+	found := false
+	for i := 0; i < 5; i++ {
+		_, b, err := c.ReadMessage()
+		if err != nil {
+			t.Fatalf("read ws bootstrap message: %v", err)
+		}
+		var ev WSEvent
+		if err := json.Unmarshal(b, &ev); err != nil {
+			continue
+		}
+		if ev.Type != "threads_update" {
+			continue
+		}
+		for _, t := range ev.Threads {
+			if t.ID == "bootstrap-1" {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	if !found {
+		t.Fatal("ws bootstrap did not include latest sidecar threads")
+	}
+}
+
+func TestIntegrationServeWSBootstrapDedupesDuplicateThreadIDs(t *testing.T) {
+	t.Setenv("AGENTMARK_DATA_DIR", t.TempDir())
+	root := t.TempDir()
+	file := filepath.Join(root, "doc.md")
+	if err := os.WriteFile(file, []byte("# Doc\n\nBody\n"), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+	port := freeTCPPort(t)
+	baseURL := fmt.Sprintf("http://127.0.0.1:%s", port)
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%s/ws", port)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Start(ctx, Config{FilePath: file, Port: port})
+	}()
+	waitForReady(t, baseURL)
+
+	threads := []CommentThread{
+		{
+			ID:         "dup-1",
+			AnchorText: "missing text",
+			Detached:   true,
+			Thread: []CommentMessage{
+				{Role: "agent", Body: "detached copy", TS: time.Now().UnixMilli()},
+			},
+		},
+		{
+			ID:         "dup-1",
+			AnchorText: "Body",
+			Thread: []CommentMessage{
+				{Role: "agent", Body: "attached copy", TS: time.Now().UnixMilli() + 1},
+			},
+		},
+	}
+	if err := SaveThreads(file, threads); err != nil {
+		t.Fatalf("save sidecar: %v", err)
+	}
+
+	c, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	defer c.Close()
+	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+
+	var got []CommentThread
+	for i := 0; i < 6; i++ {
+		_, b, err := c.ReadMessage()
+		if err != nil {
+			t.Fatalf("read ws bootstrap message: %v", err)
+		}
+		var ev WSEvent
+		if err := json.Unmarshal(b, &ev); err != nil {
+			continue
+		}
+		if ev.Type == "threads_update" {
+			got = ev.Threads
+			break
+		}
+	}
+	if len(got) == 0 {
+		t.Fatal("ws bootstrap did not include threads_update")
+	}
+	dupCount := 0
+	var canonical *CommentThread
+	for i := range got {
+		if got[i].ID != "dup-1" {
+			continue
+		}
+		dupCount++
+		canonical = &got[i]
+	}
+	if dupCount != 1 {
+		t.Fatalf("expected exactly one dup-1 thread, got %d (threads=%+v)", dupCount, got)
+	}
+	if canonical == nil {
+		t.Fatal("missing canonical dup-1 thread")
+	}
+	if canonical.Detached {
+		t.Fatalf("expected canonical dup-1 thread to be attached, got detached: %+v", *canonical)
+	}
+}
+
+func TestIntegrationServeWSBootstrapConcurrentBroadcasts(t *testing.T) {
+	t.Setenv("AGENTMARK_DATA_DIR", t.TempDir())
+	root := t.TempDir()
+	file := filepath.Join(root, "doc.md")
+	if err := os.WriteFile(file, []byte("# Doc\n\nBody\n"), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+	port := freeTCPPort(t)
+	baseURL := fmt.Sprintf("http://127.0.0.1:%s", port)
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%s/ws", port)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Start(ctx, Config{FilePath: file, Port: port})
+	}()
+	waitForReady(t, baseURL)
+
+	c, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	defer c.Close()
+
+	postErrCh := make(chan error, 1)
+	go func() {
+		for i := 0; i < 20; i++ {
+			payload := map[string]any{
+				"id":         fmt.Sprintf("race-%d", i),
+				"anchorText": "Body",
+				"message":    "race check",
+			}
+			raw, err := json.Marshal(payload)
+			if err != nil {
+				postErrCh <- err
+				return
+			}
+			resp, err := http.Post(baseURL+"/api/threads/upsert", "application/json", bytes.NewReader(raw))
+			if err != nil {
+				postErrCh <- err
+				return
+			}
+			_, _ = io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				postErrCh <- fmt.Errorf("upsert status=%d", resp.StatusCode)
+				return
+			}
+		}
+		postErrCh <- nil
+	}()
+
+	bootstrapSeen := 0
+	threadsUpdateSeen := false
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		_ = c.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+		_, b, err := c.ReadMessage()
+		if err != nil {
+			continue
+		}
+		var ev WSEvent
+		if err := json.Unmarshal(b, &ev); err != nil {
+			continue
+		}
+		switch ev.Type {
+		case "active_file", "file_update":
+			bootstrapSeen++
+		case "threads_update":
+			threadsUpdateSeen = true
+		}
+		if bootstrapSeen >= 2 && threadsUpdateSeen {
+			break
+		}
+	}
+
+	if err := <-postErrCh; err != nil {
+		t.Fatalf("post threads/upsert: %v", err)
+	}
+	if bootstrapSeen < 2 {
+		t.Fatalf("expected bootstrap ws messages, got %d", bootstrapSeen)
+	}
+	if !threadsUpdateSeen {
+		t.Fatal("did not receive threads_update under concurrent broadcast load")
 	}
 }

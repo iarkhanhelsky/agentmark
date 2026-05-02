@@ -365,7 +365,54 @@ func ReanchorThreadsWithStore(markdown string, input []CommentThread, snap *Snap
 	for i := range input {
 		out[i] = reanchorOneThread(markdown, input[i], snap)
 	}
+	return dedupeThreadsByID(out)
+}
+
+func dedupeThreadsByID(input []CommentThread) []CommentThread {
+	if len(input) <= 1 {
+		return input
+	}
+	order := make([]string, 0, len(input))
+	byID := make(map[string]CommentThread, len(input))
+	for _, t := range input {
+		if strings.TrimSpace(t.ID) == "" {
+			continue
+		}
+		cur, exists := byID[t.ID]
+		if !exists {
+			order = append(order, t.ID)
+			byID[t.ID] = t
+			continue
+		}
+		byID[t.ID] = pickCanonicalThread(cur, t)
+	}
+	out := make([]CommentThread, 0, len(order))
+	for _, id := range order {
+		if t, ok := byID[id]; ok {
+			out = append(out, t)
+		}
+	}
 	return out
+}
+
+func pickCanonicalThread(a, b CommentThread) CommentThread {
+	score := func(t CommentThread) int {
+		s := len(t.Thread) * 100
+		if !t.Detached {
+			s += 10
+		}
+		if t.Anchor != nil {
+			s += 2
+		}
+		if strings.TrimSpace(t.AnchorText) != "" {
+			s++
+		}
+		return s
+	}
+	if score(b) > score(a) {
+		return b
+	}
+	return a
 }
 
 func max(a, b int) int {

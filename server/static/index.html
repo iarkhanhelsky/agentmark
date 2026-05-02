@@ -6,32 +6,62 @@
   <title>AgentMark</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:wght@400;600&display=swap"
+    rel="stylesheet"
+  />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" />
   <link rel="stylesheet" href="/static/styles.css" />
+  <!-- agentmark-server-id -->
   <script defer src="https://cdn.jsdelivr.net/npm/marked@15.0.6/marked.min.js"></script>
   <script defer src="/static/app.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
 </head>
 <body x-data="shell" x-init="init()">
-  <div class="app-layout" :class="{ 'history-open': historyOpen }">
-    <aside class="file-tree" aria-label="Files">
+  <div class="app-layout" :class="{ 'history-open': historyOpen, 'sidebar-collapsed': sidebarCollapsed }">
+    <aside class="file-tree" :class="{ collapsed: sidebarCollapsed }" aria-label="Files">
       <div class="brand">
-        <svg class="brand-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-          <path
-            d="M4 14l4-4 4 4 8-8"
-            stroke="currentColor"
-            stroke-width="2.2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-        <span class="brand-wordmark">
-          <span class="brand-agent">Agent</span><span class="brand-mark-text">Mark</span><span class="brand-prompt" aria-hidden="true">&gt;_</span>
-        </span>
+        <button
+          type="button"
+          class="sidebar-toggle-btn"
+          @click="toggleSidebar()"
+          :aria-label="sidebarCollapsed ? 'Expand file sidebar' : 'Collapse file sidebar'"
+          :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+        >
+          <i class="fa-solid" :class="sidebarCollapsed ? 'fa-angles-right' : 'fa-angles-left'" aria-hidden="true"></i>
+        </button>
+        <div class="brand-header-mark" aria-label="AgentMark">
+          <svg class="brand-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+            <path
+              d="M4 14l4-4 4 4 8-8"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          <span class="brand-wordmark" x-show="!sidebarCollapsed" x-cloak>
+            <span class="brand-agent">Agent</span><span class="brand-mark-text">Mark</span><span class="brand-prompt" aria-hidden="true">&gt;_</span>
+          </span>
+        </div>
+      </div>
+      <div class="collapsed-sidebar-rail" x-show="sidebarCollapsed" x-cloak>
+        <div class="sidebar-quick-actions" aria-label="Sidebar quick actions">
+          <button
+            type="button"
+            class="sidebar-rail-folder"
+            @click="toggleSidebar()"
+            title="Open files panel"
+            aria-label="Open files panel"
+          >
+            <i class="fa-solid fa-folder" aria-hidden="true"></i>
+          </button>
+        </div>
       </div>
 
-      <template x-for="section in projectTree.sections" :key="section.label || '__root__'">
+      <template x-if="!sidebarCollapsed">
+        <div>
+          <template x-for="section in projectTree.sections" :key="section.label || '__root__'">
         <div class="tree-section">
           <div class="tree-section-label" x-show="section.label" x-text="section.label"></div>
           <template x-for="f in section.files" :key="f.relPath">
@@ -46,6 +76,8 @@
               <span class="tree-badge" x-show="f.openCommentCount > 0" x-text="f.openCommentCount"></span>
             </div>
           </template>
+        </div>
+      </template>
         </div>
       </template>
     </aside>
@@ -86,6 +118,26 @@
         </div>
         <div class="toolbar-right">
           <div class="toolbar-cluster" x-show="viewMode === 'preview'">
+            <button
+              type="button"
+              class="toolbar-unread-chip"
+              x-show="unreadCount > 0"
+              x-text="unreadCount"
+              @click="jumpToFirstUnread()"
+              title="Jump to first unread thread"
+              aria-label="Jump to first unread thread"
+            ></button>
+            <span
+              class="agent-activity-label"
+              x-show="agentActivityLabel"
+              x-text="agentActivityLabel"
+            ></span>
+            <span
+              class="ws-status-dot"
+              :class="wsState"
+              :title="wsState === 'connected' ? 'Live updates connected' : (wsState === 'reconnecting' ? 'Reconnecting live updates' : 'Live updates disconnected')"
+              aria-label="Live updates status"
+            ></span>
             <div class="toolbar-comment-nav" title="Unresolved comments">
               <button
                 type="button"
@@ -130,7 +182,6 @@
               <span x-text="detachedCount + ' detached'"></span>
             </button>
           </div>
-          <button type="button" class="btn btn-ghost" @click="copyReviewContext()">Copy context</button>
           <button
             type="button"
             class="btn"
@@ -203,6 +254,7 @@
                 >
                   <i class="fa-regular fa-comment-dots" aria-hidden="true" x-show="!item.resolved"></i>
                   <i class="fa-solid fa-check" aria-hidden="true" x-show="item.resolved"></i>
+                  <span class="unread-dot" x-show="unreadThreadIds.has(item.id)"></span>
                 </button>
               </template>
             </div>
@@ -212,6 +264,7 @@
           <div class="bubble-rail" id="bubble-rail" x-show="viewMode === 'preview'" aria-live="polite">
             <div
               class="comment-bubble comment-thread-popover"
+              :class="{ 'comment-bubble-fading': bubbleFading }"
               x-show="activeThreadId && bubble.open && activeThread"
               x-cloak
               @click.stop
@@ -236,7 +289,8 @@
                       @click="toggleResolve(activeThreadId, !(activeThread && activeThread.resolved))"
                       :title="activeThread && activeThread.resolved ? 'Unresolve' : 'Resolve'"
                     >
-                      <i class="fa-solid fa-check" aria-hidden="true"></i>
+                      <i class="fa-solid fa-check" aria-hidden="true" x-show="!(activeThread && activeThread.resolved)"></i>
+                      <i class="fa-solid fa-arrow-rotate-left" aria-hidden="true" x-show="activeThread && activeThread.resolved"></i>
                     </button>
                     <button type="button" class="bubble-icon-btn" @click="closeThread()" title="Close">
                       <i class="fa-solid fa-xmark" aria-hidden="true"></i>
@@ -253,7 +307,7 @@
                     &ldquo;<span x-text="activeThread && activeThread.anchorText"></span>&rdquo;
                   </div>
                   <div class="thread-parent" x-show="activeThread">
-                    <div class="thread-row-head">
+                    <div class="thread-row-head" :class="{ 'thread-msg-new': messageIsNew(parentMessage(activeThread)) }">
                       <div
                         class="thread-avatar thread-avatar-lg"
                         :class="avatarClass(parentMessage(activeThread), true)"
@@ -266,7 +320,7 @@
                   </div>
                   <div class="thread-replies" x-show="replyMessages(activeThread).length">
                     <template x-for="(m, idx) in replyMessages(activeThread)" :key="idx">
-                      <div class="bubble-msg-row thread-reply-row" :class="messageRoleRowClass(m)">
+                      <div class="bubble-msg-row thread-reply-row" :class="[messageRoleRowClass(m), messageIsNew(m) ? 'thread-msg-new' : '']">
                         <div class="thread-row-head thread-row-head-reply">
                           <div
                             class="thread-avatar"
@@ -292,13 +346,13 @@
                   </template>
                 </div>
                 <div class="bubble-card-footer">
-                  <input
-                    type="text"
+                  <textarea
                     class="bubble-reply-input"
                     placeholder="Reply or use @mention..."
                     x-model="drafts[activeThreadId]"
-                    @keydown.enter.prevent="sendReply(activeThreadId)"
-                  />
+                    rows="1"
+                    @keydown="onReplyKeydown(activeThreadId, $event)"
+                  ></textarea>
                   <button type="button" class="bubble-send-btn btn-send" @click="sendReply(activeThreadId)" title="Send">
                     <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
                   </button>

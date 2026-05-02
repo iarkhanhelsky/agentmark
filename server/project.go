@@ -251,6 +251,10 @@ func (a *App) switchToFile(abs string) error {
 		a.stopWatch()
 		a.stopWatch = nil
 	}
+	if a.stopCommentsWatch != nil {
+		a.stopCommentsWatch()
+		a.stopCommentsWatch = nil
+	}
 	a.cfg.FilePath = abs
 	a.content = content
 	a.threads = threads
@@ -277,6 +281,16 @@ func (a *App) switchToFile(abs string) error {
 		return werr
 	}
 	a.stopWatch = stopWatch
+	stopCommentsWatch, cerr := WatchFile(CommentsPathFor(abs), 150*time.Millisecond, func(_ string) {
+		a.reloadThreadsFromSidecar()
+	})
+	if cerr != nil {
+		a.stopWatch()
+		a.stopWatch = nil
+		a.mu.Unlock()
+		return cerr
+	}
+	a.stopCommentsWatch = stopCommentsWatch
 	a.mu.Unlock()
 
 	list, _ := snapStore.List()

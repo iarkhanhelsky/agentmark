@@ -10,10 +10,10 @@
         "prefix": "# ",
         "suffix": "\n\n**Motivation.** When you and an agent ",
         "longPrefix": "# ",
-        "longSuffix": "\n\n**Motivation.** When you and an agent iterate on markdown, you need a quick way to leave feedback that stays tied to t"
+        "longSuffix": "\n\n**Motivation.** When you and an agent iterate on markdown, you need feedback tied to exact passages, not scattered cha"
       },
       "anchorNormalized": "AgentMark",
-      "anchorBasisHash": "a6e783d7613755096b8b279912115d3d1c584e15d149dc18323865d88cbd4ea4",
+      "anchorBasisHash": "39a46e89265137670c958dc1833b1c4f7fb7edb5da76af73b502dd219074f0ac",
       "resolved": true,
       "thread": [
         {
@@ -52,15 +52,15 @@
       "id": "9e931614-0633-4d3a-b819-8137b63c8dc3",
       "anchorText": "Get started",
       "anchor": {
-        "startOffset": 861,
-        "endOffset": 872,
+        "startOffset": 1015,
+        "endOffset": 1026,
         "prefix": "hout treating git as a scratch pad.\n\n## ",
         "suffix": "\n\n1. **Install** — release packages ar",
         "longPrefix": "utside the repo) so you can step through versions, diff, and recover wording without treating git as a scratch pad.\n\n## ",
         "longSuffix": "\n\n1. **Install** — release packages are TBD. Until then, build from source (see [Development](#development)) or use th"
       },
       "anchorNormalized": "Get started",
-      "anchorBasisHash": "a6e783d7613755096b8b279912115d3d1c584e15d149dc18323865d88cbd4ea4",
+      "anchorBasisHash": "39a46e89265137670c958dc1833b1c4f7fb7edb5da76af73b502dd219074f0ac",
       "resolved": true,
       "thread": [
         {
@@ -79,15 +79,16 @@
       "id": "dbe9801d-8e87-4705-aa84-0ae7d53fdf31",
       "anchorText": "Where data lives",
       "anchor": {
-        "startOffset": 2969,
-        "endOffset": 2985,
-        "prefix": "ments reattach` to link them again.\n\n## ",
-        "suffix": "\n\nComment sidecars and snapshot paths ar",
-        "longPrefix": "HED]` section in the copied context; use **Re-attach** (select new text) or `comments reattach` to link them again.\n\n## ",
-        "longSuffix": "\n\nComment sidecars and snapshot paths are described in [docs/storage-and-history.md](docs/storage-and-history.md).\n\n## D"
+        "startOffset": 2925,
+        "endOffset": 2941,
+        "prefix": "k --port 8080 --no-open ./docs/\n```\n\n## ",
+        "suffix": "\n\nAgentMark stores review state outside ",
+        "longPrefix": "r polish pass\"\n\n# Combine optional flags (for remote/headless usage)\n./wagentmark --port 8080 --no-open ./docs/\n```\n\n## ",
+        "longSuffix": "\n\nAgentMark stores review state outside your document content:\n- Comment threads in sidecar files next to markdown docs."
       },
       "anchorNormalized": "Where data lives",
-      "anchorBasisHash": "a6e783d7613755096b8b279912115d3d1c584e15d149dc18323865d88cbd4ea4",
+      "anchorBasisHash": "39a46e89265137670c958dc1833b1c4f7fb7edb5da76af73b502dd219074f0ac",
+      "resolved": true,
       "thread": [
         {
           "role": "user",
@@ -103,22 +104,183 @@
     },
     {
       "id": "52867d37-a632-45c4-9ce0-03dca73ff31d",
-      "anchorText": "Motivation.** When you and an agent iterate on markdown, you need a quick way to leave feedback that stays tied to the text—not another long paste into chat. AgentMark gives you anchored comment threads on the document so humans can steer and agents can respond with concrete edits.",
+      "anchorText": "Motivation.** When you and an agent iterate on markdown, you need feedback tied to exact passages, not scattered chat context. AgentMark gives you anchored threads so humans can steer edits and agen",
       "anchor": {
         "startOffset": 15,
-        "endOffset": 299,
+        "endOffset": 213,
         "prefix": "# AgentMark\n\n**",
-        "suffix": "\n\n**Collaboration.** You work in the rev",
+        "suffix": "ts can respond precisely.\n\n**Core princi",
         "longPrefix": "# AgentMark\n\n**",
-        "longSuffix": "\n\n**Collaboration.** You work in the review UI (or your IDE integration): add comments on passages, keep threads open un"
+        "longSuffix": "ts can respond precisely.\n\n**Core principles.**\n- **System of record, not runner.** AgentMark owns review data; executio"
       },
       "anchorNormalized": "Motivation.** When you and an agent iterate on markdown, you need a quick way to leave feedback that stays tied to the text—not another long paste into chat. AgentMark gives you anchored comment threads on the document so humans can steer and agents can respond with concrete edits.",
-      "anchorBasisHash": "a6e783d7613755096b8b279912115d3d1c584e15d149dc18323865d88cbd4ea4",
+      "anchorBasisHash": "39a46e89265137670c958dc1833b1c4f7fb7edb5da76af73b502dd219074f0ac",
+      "resolved": true,
       "thread": [
         {
           "role": "user",
           "body": "This is a test comment to check multiline input\n\nYou don't need to change anything. Just acknowledge and resolve",
           "ts": 1777730496137
+        },
+        {
+          "role": "agent",
+          "body": "Claude, Cursor\n\nAcknowledged again. This test thread requests no content changes, so README remains unchanged.",
+          "ts": 1777737138143
+        }
+      ]
+    },
+    {
+      "id": "9eb8cc38-9381-4dd0-a438-24d0c4cb5e41",
+      "anchorText": "Motivation.** When you and an agent iterate on markdown, you need feedback tied to exact passages, not scattered chat context. AgentMark gives you anchored threads so humans can steer edits and agents can respond precisely.\n\n**Core principles.**\n- **System of record, not runner.** AgentMark owns review data; execution loops (daemon/chat/session orchestration) stay outside.\n- **LLM-agnostic workflow.** Teams can use any LLM tool to work through content while keeping comments, anchors, and history in one place.\n- **Explicit state ownership.** Server truth: document, threads, timestamps, detached/resolved state. Client truth: personal read/unread cursors in browser storage. External truth: automation lifecycle health.\n\n**History without git noise.** Drafts change constantly; you do not want every iteration as a commit. AgentMark records automatic snapshots of the file (outside the repo) so you can step through versions, diff, and recover wording without treating git as a scratch pad.",
+      "anchor": {
+        "startOffset": 15,
+        "endOffset": 1010,
+        "prefix": "# AgentMark\n\n**",
+        "suffix": "\n\n## Get started\n\n1. **Install** — rel",
+        "longPrefix": "# AgentMark\n\n**",
+        "longSuffix": "\n\n## Get started\n\n1. **Install** — release packages are TBD. Until then, build from source (see [Development](#develop"
+      },
+      "anchorNormalized": "Motivation.** When you and an agent iterate on markdown, you need a quick way to leave feedback that stays tied to the text—not another long paste into chat. AgentMark gives you anchored comment threads on the document so humans can steer and agents can respond with concrete edits. **Collaboration.** You work in the review UI (or your IDE integration): add comments on passages, keep threads open until the wording matches intent, then resolve them. Agents can follow the same threads from **Copy review context** or via the `comments` CLI against the file on disk. **History without git noise.** Drafts change constantly; you do not want every iteration as a commit. AgentMark records automatic snapshots of the file (outside the repo) so you can step through versions, diff, and recover wording without treating git as a scratch pad.",
+      "anchorBasisHash": "39a46e89265137670c958dc1833b1c4f7fb7edb5da76af73b502dd219074f0ac",
+      "resolved": true,
+      "thread": [
+        {
+          "role": "user",
+          "body": "Update description to mention core principles:",
+          "ts": 1777736856349
+        },
+        {
+          "role": "user",
+          "body": "AgentMark is system-of-record, not the agent runner Keep the product LLM-agnostic; comments, anchors, thread state, and history live in AgentMark, while execution loops live outside.  State ownership is explicit  Server truth: document, threads, message timestamps, detached/resolved state. Client truth (personal): read/unread cursors in browser storage. External truth: automation lifecycle (loop/daemon/chat session health).",
+          "ts": 1777736860945
+        },
+        {
+          "role": "user",
+          "body": "users can pick any llm tool to work through the content",
+          "ts": 1777736889208
+        },
+        {
+          "role": "user",
+          "body": "Hello, anyone here?",
+          "ts": 1777737115348
+        },
+        {
+          "role": "agent",
+          "body": "Claude, Cursor\n\nYes—still here. The requested core-principles update is already applied in the README opening. No further edits were requested in this follow-up message.",
+          "ts": 1777737138391
+        }
+      ]
+    },
+    {
+      "id": "cli-1777737514451820000",
+      "anchorText": "# Reply and resolve",
+      "anchor": {
+        "startOffset": 2230,
+        "endOffset": 2249,
+        "prefix": "\" --body \"Please clarify this section\"\n\n",
+        "suffix": "\n./wagentmark comments reply ./README.md",
+        "longPrefix": "text in the file\n./wagentmark comments add ./README.md --anchor \"exact substring\" --body \"Please clarify this section\"\n\n",
+        "longSuffix": "\n./wagentmark comments reply ./README.md --thread \u003cid\u003e --body \"Updated in latest edit\" --role agent\n# Default policy: hu"
+      },
+      "anchorNormalized": "# Reply and resolve",
+      "anchorBasisHash": "39a46e89265137670c958dc1833b1c4f7fb7edb5da76af73b502dd219074f0ac",
+      "resolved": true,
+      "thread": [
+        {
+          "role": "agent",
+          "body": "Claude, Cursor\n\nSuggestion: clarify who should resolve threads and when. In agent-assisted flows, premature resolve can hide unfinished work; consider adding guidance like 'reply first, resolve only after human confirmation or explicit policy'.",
+          "ts": 1777737514451
+        },
+        {
+          "role": "user",
+          "body": "Let's make sure to mention that only humans can resolve comments unless explicitly asked",
+          "ts": 1777738275830
+        },
+        {
+          "role": "agent",
+          "body": "Claude, Cursor\n\nUpdated the CLI workflow example to document default policy: humans resolve threads unless they explicitly ask an agent to resolve.",
+          "ts": 1777738458940
+        }
+      ]
+    },
+    {
+      "id": "cli-1777737522245575000",
+      "anchorText": "Optional: `--port 4173` (default), `--no-open` to skip opening a browser tab.",
+      "anchor": {
+        "startOffset": 1366,
+        "endOffset": 1443,
+        "prefix": "/wagentmark ./path/to/doc.md\n   ```\n\n   ",
+        "suffix": "\n   Discover flags and subcommands with ",
+        "longPrefix": "le. This starts the local review server and opens your browser.\n\n   ```bash\n   ./wagentmark ./path/to/doc.md\n   ```\n\n   ",
+        "longSuffix": "\n   Discover flags and subcommands with `./wagentmark --help`.\n\n3. **Use the UI** — read the preview, add comments anc"
+      },
+      "anchorNormalized": "Optional: `--port 4173` (default), `--no-open` to skip opening a browser tab.",
+      "anchorBasisHash": "39a46e89265137670c958dc1833b1c4f7fb7edb5da76af73b502dd219074f0ac",
+      "resolved": true,
+      "thread": [
+        {
+          "role": "agent",
+          "body": "Claude, Cursor\n\nSuggestion: add a short discoverability note such as `./wagentmark --help`, plus one advanced example combining flags (for example custom port + `--no-open`). This cuts trial-and-error and helps users understand CLI capabilities quickly.",
+          "ts": 1777737522245
+        },
+        {
+          "role": "user",
+          "body": "Good point, let's address",
+          "ts": 1777738291212
+        },
+        {
+          "role": "agent",
+          "body": "Claude, Cursor\n\nAddressed: added `./wagentmark --help` discoverability guidance and a combined flags example (`--port 8080 --no-open`) in the CLI workflow block.",
+          "ts": 1777738459144
+        }
+      ]
+    },
+    {
+      "id": "cli-1777737525382056000",
+      "anchorText": "Alpine.js + `marked` (CDN) in embedded static assets",
+      "anchor": {
+        "startOffset": 3491,
+        "endOffset": 3543,
+        "prefix": "hi`, `fsnotify`, `gorilla/websocket`)\n- ",
+        "suffix": "\n  - CDN assets are version-pinned; rest",
+        "longPrefix": "rapper around `go run .` for the same CLI.\n\n## Stack\n\n- Go 1.22+ (`net/http`, `chi`, `fsnotify`, `gorilla/websocket`)\n- ",
+        "longSuffix": "\n  - CDN assets are version-pinned; restricted/offline environments may require mirroring or local vendoring.\n"
+      },
+      "anchorNormalized": "Alpine.js + `marked` (CDN) in embedded static assets",
+      "anchorBasisHash": "39a46e89265137670c958dc1833b1c4f7fb7edb5da76af73b502dd219074f0ac",
+      "resolved": true,
+      "thread": [
+        {
+          "role": "agent",
+          "body": "Claude, Cursor\n\nSuggestion: add one line describing CDN operational posture: version pinning policy, expected behavior in offline/air-gapped environments, and any integrity/security controls. This helps enterprise adopters evaluate fit quickly.",
+          "ts": 1777737525382
+        },
+        {
+          "role": "agent",
+          "body": "Claude, Cursor\n\nAdded a CDN posture note under Stack: assets are version-pinned, and restricted/offline environments may need mirroring or local vendoring.",
+          "ts": 1777738459351
+        }
+      ]
+    },
+    {
+      "id": "43fa06eb-8429-4c97-a2af-e6ffa7bb0741",
+      "anchorText": "When you and an agent iterate on markdown, you need feedback tied to exact passages, not scattered chat context. AgentMark gives you anc",
+      "anchor": {
+        "startOffset": 29,
+        "endOffset": 165,
+        "prefix": "# AgentMark\n\n**Motivation.** ",
+        "suffix": "hored threads so humans can steer edits ",
+        "longPrefix": "# AgentMark\n\n**Motivation.** ",
+        "longSuffix": "hored threads so humans can steer edits and agents can respond precisely.\n\n**Core principles.**\n- **System of record, no"
+      },
+      "anchorNormalized": "When you and an agent iterate on markdown, you need feedback tied to exact passages, not scattered chat context. AgentMark gives you anc",
+      "anchorBasisHash": "39a46e89265137670c958dc1833b1c4f7fb7edb5da76af73b502dd219074f0ac",
+      "resolved": true,
+      "thread": [
+        {
+          "role": "user",
+          "body": "Test",
+          "ts": 1777738652817
         }
       ]
     }

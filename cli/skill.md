@@ -3,7 +3,7 @@ name: agentmark
 description: >-
   Interact with AgentMark markdown review: comment threads (sidecar JSON) and
   named document snapshots via the agentmark CLI. Use when reading, writing, or
-  resolving review comments on .md files, listing history, diffing versions, or
+  replying to review comments on .md files, listing history, diffing versions, or
   saving labeled checkpoints.
 ---
 
@@ -73,12 +73,18 @@ agentmark comments add ./doc.md --anchor "exact substring" --body "..." [--role 
 agentmark comments reply ./doc.md --thread <id> --body "..." [--role agent]
 ```
 
-**Resolve / reopen**:
+**Resolve / reopen** (manual control; do not use for routine agent triage):
 
 ```bash
 agentmark comments resolve ./doc.md --thread <id>
 agentmark comments unresolve ./doc.md --thread <id>
 ```
+
+Agent behavior rule:
+- Do **not** resolve threads as part of normal agent workflow.
+- Instead, surface open threads requiring agent action:
+  - open thread where the latest message is from `user` (agent reply required)
+  - open thread explicitly requesting an action from the agent
 
 ## Snapshots
 
@@ -118,7 +124,7 @@ agentmark snapshot diff ./doc.md --a <id> --b <other-id>
 1. `agentmark comments list ./doc.md --open` — pick thread ids.
 2. Edit the markdown in your editor or patch tool.
 3. `agentmark comments reply ./doc.md --thread <id> --body "..." --role agent`
-4. `agentmark comments resolve ./doc.md --thread <id>` when done.
+4. Report remaining open threads that still require agent reply/action.
 5. `agentmark snapshot save ./doc.md --label "checkpoint"` before large edits.
 
 ## Install this skill

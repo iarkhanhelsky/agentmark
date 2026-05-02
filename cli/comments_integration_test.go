@@ -141,6 +141,11 @@ func TestIntegrationCommentsValidationErrors(t *testing.T) {
 			wantErrLike: "first line of --body must identify the source",
 		},
 		{
+			name:        "add rejects missing exact anchor substring",
+			args:        []string{"comments", "add", md, "--anchor", "Alpha `line`", "--body", "Cursor\n\nx", "--role", "agent"},
+			wantErrLike: "anchor text not found exactly in file",
+		},
+		{
 			name:        "reply thread missing",
 			args:        []string{"comments", "reply", md, "--thread", "missing", "--body", "Cursor\n\nx", "--role", "agent"},
 			wantErrLike: "thread not found",
@@ -165,6 +170,36 @@ func TestIntegrationCommentsValidationErrors(t *testing.T) {
 				t.Fatalf("stderr %q missing %q", got.stderr, tc.wantErrLike)
 			}
 		})
+	}
+}
+
+func TestIntegrationCommentsAddDoesNotCreateDetachedSidecarEntry(t *testing.T) {
+	t.Setenv("AGENTMARK_DATA_DIR", t.TempDir())
+	root := t.TempDir()
+	md := filepath.Join(root, "doc.md")
+	writeFile(t, md, "# Title\n\nOptional: `--port 4173` (default)\n")
+
+	got := runCLI(t, []string{
+		"comments", "add", md,
+		"--anchor", "Optional:  (default)",
+		"--body", "Cursor\n\nx",
+		"--role", "agent",
+	})
+	if got.err == nil {
+		t.Fatalf("expected add failure for non-exact anchor")
+	}
+	if !hasJSONError(got.stderr) {
+		t.Fatalf("expected JSON stderr, got %q", got.stderr)
+	}
+	if !strings.Contains(got.stderr, "anchor text not found exactly in file") {
+		t.Fatalf("stderr %q missing anchor-not-found message", got.stderr)
+	}
+
+	sidecarPath := server.CommentsPathFor(md)
+	if _, err := os.Stat(sidecarPath); err == nil {
+		t.Fatalf("expected no sidecar created on failed add, found %s", sidecarPath)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat sidecar: %v", err)
 	}
 }
 

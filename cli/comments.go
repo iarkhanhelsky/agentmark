@@ -224,11 +224,13 @@ func newCommentsAddCommand() *cobra.Command {
 			id := fmt.Sprintf("cli-%d", time.Now().UnixNano())
 			t := server.CommentThread{ID: id, AnchorText: strings.TrimSpace(anchor), Thread: nil}
 			hint := strings.Index(markdown, anchor)
-			if hint >= 0 {
-				end := hint + len(strings.TrimSpace(anchor))
-				an := server.BuildAnchor(markdown, hint, end)
-				t.Anchor = &an
+			if hint < 0 {
+				WriteError(fmt.Errorf("anchor text not found exactly in file; copy the exact markdown substring (including backticks/punctuation)"))
+				return ErrAlreadyReported
 			}
+			end := hint + len(strings.TrimSpace(anchor))
+			an := server.BuildAnchor(markdown, hint, end)
+			t.Anchor = &an
 			t.Thread = append(t.Thread, server.CommentMessage{
 				Role: role, Body: body, TS: time.Now().UnixMilli(),
 			})

@@ -14,6 +14,8 @@ function shell() {
     activeThreadId: null,
     gutterLayout: [],
     bubble: { open: false, top: 0 },
+    bubbleFading: false,
+    _bubbleFadeTimer: null,
     drafts: {},
     toolbar: { show: false, top: 0, left: 0 },
     sel: { text: "", prefix: "", suffix: "" },
@@ -27,9 +29,16 @@ function shell() {
       accept: {},
     },
     ws: null,
+    wsState: "connecting",
+    _wsRetryMs: 1000,
+    _wsReconnectTimer: null,
+    _projectHash: "",
+    _lastSeenFile: 0,
+    _unreadThreadIds: new Set(),
     _scrollScheduled: false,
     _pendingOpenId: null,
     detachedPanelOpen: false,
+    sidebarCollapsed: false,
 
     get visibleThreads() {
       return this.threads.filter((t) => !t.detached);
@@ -45,6 +54,31 @@ function shell() {
 
     get commentCount() {
       return this.visibleThreads.length;
+    },
+
+    get unreadThreadIds() {
+      return this._unreadThreadIds;
+    },
+
+    get unreadCount() {
+      return this._unreadThreadIds.size;
+    },
+
+    get lastAgentActivity() {
+      let maxTS = 0;
+      for (const t of this.threads || []) {
+        for (const m of t.thread || []) {
+          const role = (m && m.role ? String(m.role) : "").toLowerCase().trim();
+          const ts = Number(m && m.ts);
+          if (role === "agent" && Number.isFinite(ts) && ts > maxTS) maxTS = ts;
+        }
+      }
+      return maxTS > 0 ? maxTS : null;
+    },
+
+    get agentActivityLabel() {
+      if (!this.lastAgentActivity) return "";
+      return `Agent \u00b7 ${this.relativeTimeFromTs(this.lastAgentActivity)}`;
     },
 
     get canNavigateComments() {
@@ -65,9 +99,113 @@ function shell() {
     },
 
     init() {
+      this.initProjectHash();
+      this.initSidebarState();
       this.fetchFileMeta();
       this.fetchProjectTree();
       this.connectWS();
+    },
+
+    initSidebarState() {
+      try {
+        this.sidebarCollapsed = localStorage.getItem("agentmark:sidebarCollapsed") === "1";
+      } catch (_) {
+        this.sidebarCollapsed = false;
+      }
+    },
+
+    toggleSidebar() {
+      this.sidebarCollapsed = !this.sidebarCollapsed;
+      try {
+        localStorage.setItem("agentmark:sidebarCollapsed", this.sidebarCollapsed ? "1" : "0");
+      } catch (_) {
+        /* ignore */
+      }
+    },
+
+    initProjectHash() {
+      const sid = document.querySelector('meta[name="agentmark-server-id"]')?.content || "";
+      this._projectHash = this.djb2Hash(sid || "local");
+    },
+
+    djb2Hash(input) {
+      let h = 5381;
+      for (let i = 0; i < input.length; i++) h = (h * 33) ^ input.charCodeAt(i);
+      return (h >>> 0).toString(16).padStart(8, "0");
+    },
+
+    lsFileKey(relPath) {
+      if (!this._projectHash || !relPath) return "";
+      return `agentmark:lastSeen:${this._projectHash}:${relPath}`;
+    },
+
+    lsThreadKey(relPath, threadId) {
+      if (!this._projectHash || !relPath || !threadId) return "";
+      return `agentmark:lastSeenThread:${this._projectHash}:${relPath}:${threadId}`;
+    },
+
+    readLSNumber(key) {
+      if (!key) return 0;
+      try {
+        const raw = localStorage.getItem(key);
+        const n = Number(raw);
+        return Number.isFinite(n) && n > 0 ? n : 0;
+      } catch (_) {
+        return 0;
+      }
+    },
+
+    writeLSNumber(key, value) {
+      if (!key) return;
+      try {
+        localStorage.setItem(key, String(value));
+      } catch (_) {
+        /* ignore */
+      }
+    },
+
+    loadReadCursor(relPath) {
+      this._lastSeenFile = this.readLSNumber(this.lsFileKey(relPath));
+    },
+
+    markFileSeen(relPath) {
+      if (!relPath) return;
+      this.writeLSNumber(this.lsFileKey(relPath), Date.now());
+    },
+
+    markThreadSeen(threadId) {
+      const relPath = this.fileMeta.relPath || "";
+      if (!relPath || !threadId) return;
+      this.writeLSNumber(this.lsThreadKey(relPath, threadId), Date.now());
+      const next = new Set(this._unreadThreadIds);
+      next.delete(threadId);
+      this._unreadThreadIds = next;
+    },
+
+    threadLatestTs(thread) {
+      let latest = 0;
+      for (const m of (thread && thread.thread) || []) {
+        const ts = Number(m && m.ts);
+        if (Number.isFinite(ts) && ts > latest) latest = ts;
+      }
+      return latest;
+    },
+
+    recomputeUnreadThreads() {
+      const relPath = this.fileMeta.relPath || "";
+      if (!relPath) {
+        this._unreadThreadIds = new Set();
+        return;
+      }
+      const fileSeen = this._lastSeenFile;
+      const next = new Set();
+      for (const t of this.visibleThreads) {
+        const latest = this.threadLatestTs(t);
+        if (latest <= 0) continue;
+        const threadSeen = this.readLSNumber(this.lsThreadKey(relPath, t.id));
+        if (latest > Math.max(fileSeen, threadSeen)) next.add(t.id);
+      }
+      this._unreadThreadIds = next;
     },
 
     async fetchFileMeta() {
@@ -75,6 +213,8 @@ function shell() {
         const res = await fetch("/api/file-meta");
         if (res.ok) {
           this.fileMeta = await res.json();
+          this.loadReadCursor(this.fileMeta.relPath || "");
+          this.recomputeUnreadThreads();
         }
       } catch (_) {
         /* ignore */
@@ -128,22 +268,40 @@ function shell() {
 
     connectWS() {
       const proto = window.location.protocol === "https:" ? "wss" : "ws";
-      this.ws = new WebSocket(`${proto}://${window.location.host}/ws`);
-      this.ws.onmessage = (ev) => {
+      if (this._wsReconnectTimer) {
+        clearTimeout(this._wsReconnectTimer);
+        this._wsReconnectTimer = null;
+      }
+      const ws = new WebSocket(`${proto}://${window.location.host}/ws`);
+      this.ws = ws;
+      this.wsState = this._wsRetryMs > 1000 ? "reconnecting" : "connecting";
+
+      ws.onopen = () => {
+        if (this.ws !== ws) return;
+        this.wsState = "connected";
+        this._wsRetryMs = 1000;
+      };
+
+      ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data);
         if (msg.type === "active_file") {
+          const previousRel = this.fileMeta.relPath || "";
+          if (previousRel) this.markFileSeen(previousRel);
           this.fileMeta = {
             name: msg.name || "",
             path: msg.path || "",
             relPath: msg.relPath || "",
           };
+          this.loadReadCursor(this.fileMeta.relPath || "");
           this.resetHistoryForFileSwitch();
+          this.recomputeUnreadThreads();
           this.fetchProjectTree();
         } else if (msg.type === "file_update") {
           this.markdown = msg.content;
           this.render();
         } else if (msg.type === "threads_update") {
           this.threads = msg.threads || [];
+          this.recomputeUnreadThreads();
           if (this.detachedCount === 0) this.detachedPanelOpen = false;
           this.scheduleProjectTreeRefresh();
           if (this._pendingOpenId) {
@@ -156,6 +314,20 @@ function shell() {
           if (this.historyOpen) this.loadSnapshots();
         }
       };
+
+      const scheduleReconnect = () => {
+        if (this.ws !== ws) return;
+        this.wsState = "reconnecting";
+        if (this._wsReconnectTimer) return;
+        const delay = this._wsRetryMs;
+        this._wsReconnectTimer = setTimeout(() => {
+          this._wsReconnectTimer = null;
+          this._wsRetryMs = Math.min(this._wsRetryMs * 2, 30000);
+          this.connectWS();
+        }, delay);
+      };
+      ws.onerror = () => scheduleReconnect();
+      ws.onclose = () => scheduleReconnect();
     },
 
     formatSnapLabel(snap, idx) {
@@ -297,9 +469,15 @@ function shell() {
     },
 
     openThread(id, ev) {
+      if (this._bubbleFadeTimer) {
+        clearTimeout(this._bubbleFadeTimer);
+        this._bubbleFadeTimer = null;
+      }
+      this.bubbleFading = false;
       this.toolbar.show = false;
       this.activeThreadId = id;
       this.bubble.open = true;
+      this.markThreadSeen(id);
       const evRef = ev;
       this.$nextTick(() => this.positionBubbleForThread(id, evRef));
     },
@@ -350,6 +528,12 @@ function shell() {
       return msg && msg.body ? String(msg.body) : "";
     },
 
+    messageIsNew(msg) {
+      if (!msg || msg.ts == null || msg.ts === "") return false;
+      const n = typeof msg.ts === "number" ? msg.ts : Number(msg.ts);
+      return Number.isFinite(n) && n > this._lastSeenFile;
+    },
+
     messageAuthor(msg) {
       const r = (msg && msg.role ? String(msg.role) : "").toLowerCase().trim();
       if (r === "user") return "You";
@@ -361,7 +545,11 @@ function shell() {
       if (!msg || msg.ts == null || msg.ts === "") return "";
       const n = typeof msg.ts === "number" ? msg.ts : Number(msg.ts);
       if (!Number.isFinite(n) || n <= 0) return "";
-      const deltaSeconds = Math.max(0, Math.floor((Date.now() - n) / 1000));
+      return this.relativeTimeFromTs(n);
+    },
+
+    relativeTimeFromTs(ts) {
+      const deltaSeconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
       if (deltaSeconds < 60) return "now";
       if (deltaSeconds < 3600) return `${Math.floor(deltaSeconds / 60)}m ago`;
       if (deltaSeconds < 86400) return `${Math.floor(deltaSeconds / 3600)}h ago`;
@@ -400,6 +588,11 @@ function shell() {
         return;
       }
       if (this.activeThreadId === threadId) {
+        if (this._bubbleFadeTimer) {
+          clearTimeout(this._bubbleFadeTimer);
+          this._bubbleFadeTimer = null;
+        }
+        this.bubbleFading = false;
         this.activeThreadId = null;
         this.bubble.open = false;
       }
@@ -407,6 +600,11 @@ function shell() {
     },
 
     async closeThread() {
+      if (this._bubbleFadeTimer) {
+        clearTimeout(this._bubbleFadeTimer);
+        this._bubbleFadeTimer = null;
+      }
+      this.bubbleFading = false;
       const id = this.activeThreadId;
       const t = id ? this.threads.find((x) => x.id === id) : null;
       const hasMsgs = this.threadHasMessages(t);
@@ -541,53 +739,49 @@ function shell() {
       this.drafts[threadId] = "";
     },
 
+    onReplyKeydown(threadId, event) {
+      if (!event || event.key !== "Enter" || event.shiftKey) return;
+      event.preventDefault();
+      this.sendReply(threadId);
+    },
+
     async toggleResolve(threadId, resolved) {
-      await fetch("/api/threads/resolve", {
+      const res = await fetch("/api/threads/resolve", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ id: threadId, resolved }),
       });
-    },
-
-    copyReviewContext() {
-      const path = this.fileMeta.name || "document";
-      let out = `Review context for: ${path}\n\n`;
-      out +=
-        "When editing the document, keep quoted anchor text intact when possible. " +
-        "If a passage moves, re-attach the same thread id (see CLI: comments reattach --thread <id> --anchor \"…\").\n\n";
-      let i = 1;
-      for (const t of this.visibleThreads) {
-        if (t.resolved && !this.showResolved) continue;
-        out += `[Thread ${i}] id: ${t.id}\n`;
-        out += `    Anchor: ${JSON.stringify(t.anchorText)}\n`;
-        for (const m of t.thread || []) {
-          out += `> ${m.role}: ${m.body}\n`;
-        }
-        const d = (this.drafts[t.id] || "").trim();
-        if (d) out += `> (draft): ${d}\n`;
-        out += "\n";
-        i++;
+      if (!res.ok) {
+        alert(await res.text());
+        return;
       }
-      const detached = this.detachedThreads.filter((t) => !t.resolved || this.showResolved);
-      if (detached.length) {
-        out += "\n--- [DETACHED: anchor text not found in file — re-attach after edits] ---\n\n";
-        for (const t of detached) {
-          out += `[Detached] id: ${t.id} resolved=${!!t.resolved}\n`;
-          out += `    Last anchor: ${JSON.stringify(t.anchorText)}\n`;
-          for (const m of t.thread || []) {
-            out += `> ${m.role}: ${m.body}\n`;
-          }
-          out += "\n";
-        }
+      if (resolved && this.activeThreadId === threadId && this.bubble.open) {
+        if (this._bubbleFadeTimer) clearTimeout(this._bubbleFadeTimer);
+        this.bubbleFading = true;
+        this._bubbleFadeTimer = setTimeout(() => {
+          this._bubbleFadeTimer = null;
+          this.closeThread();
+        }, 520);
       }
-      out += "\n(Paste into your IDE agent chat.)\n";
-      navigator.clipboard.writeText(out);
     },
 
     unresolvedNavList() {
       return this.visibleThreads
         .filter((t) => !t.resolved && (!t.detached))
         .sort((a, b) => (a.anchor?.startOffset ?? 0) - (b.anchor?.startOffset ?? 0));
+    },
+
+    jumpToFirstUnread() {
+      const list = this.visibleThreads
+        .filter((t) => this.unreadThreadIds.has(t.id))
+        .sort((a, b) => (a.anchor?.startOffset ?? 0) - (b.anchor?.startOffset ?? 0));
+      if (!list.length) return;
+      const first = list[0];
+      this.openThread(first.id);
+      document.querySelector(`.anchor-mark[data-thread-id="${first.id}"]`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
     },
 
     nextThread() {

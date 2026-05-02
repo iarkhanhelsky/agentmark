@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
+	"html"
 	"io/fs"
 	"log"
 	"net/http"
@@ -19,6 +21,7 @@ import (
 
 //go:embed all:static
 var staticFS embed.FS
+var indexHTMLBytes []byte
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -45,7 +48,12 @@ type App struct {
 	mu        sync.Mutex
 	wsMu      sync.Mutex
 	stopWatch func()
+	stopCommentsWatch func()
 	broadcast func(WSEvent)
+}
+
+func (a *App) writeWSMessage(c *websocket.Conn, b []byte) error {
+	return c.WriteMessage(websocket.TextMessage, b)
 }
 
 // Start runs the HTTP server; blocks until context cancelled or fatal error.
@@ -88,6 +96,18 @@ func Start(ctx context.Context, cfg Config) error {
 		cfg.ProjectRoot = rootDir
 	}
 
+	host := "localhost"
+	if h, err := os.Hostname(); err == nil && strings.TrimSpace(h) != "" {
+		host = h
+	}
+	baseIndex, err := staticFS.ReadFile("static/index.html")
+	if err != nil {
+		return err
+	}
+	serverID := html.EscapeString(host + ":" + cfg.ProjectRoot)
+	meta := []byte(`<meta name="agentmark-server-id" content="` + serverID + `">`)
+	indexHTMLBytes = bytes.Replace(baseIndex, []byte("<!-- agentmark-server-id -->"), meta, 1)
+
 	raw, err := os.ReadFile(abs)
 	if err != nil {
 		return err
@@ -121,7 +141,7 @@ func Start(ctx context.Context, cfg Config) error {
 		defer app.wsMu.Unlock()
 		b, _ := json.Marshal(ev)
 		for c := range app.clients {
-			_ = c.WriteMessage(websocket.TextMessage, b)
+			_ = app.writeWSMessage(c, b)
 		}
 	}
 
@@ -151,6 +171,16 @@ func Start(ctx context.Context, cfg Config) error {
 		return err
 	}
 	app.stopWatch = stopWatch
+	stopCommentsWatch, err := WatchFile(CommentsPathFor(abs), 150*time.Millisecond, func(_ string) {
+		app.reloadThreadsFromSidecar()
+	})
+	if err != nil {
+		if app.stopWatch != nil {
+			app.stopWatch()
+		}
+		return err
+	}
+	app.stopCommentsWatch = stopCommentsWatch
 
 	r := chi.NewRouter()
 
@@ -162,13 +192,8 @@ func Start(ctx context.Context, cfg Config) error {
 	r.Handle("/static/*", http.StripPrefix("/static/", fsServer))
 
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		b, err := staticFS.ReadFile("static/index.html")
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(b)
+		_, _ = w.Write(indexHTMLBytes)
 	})
 
 	r.Get("/ws", app.handleWS)
@@ -194,6 +219,9 @@ func Start(ctx context.Context, cfg Config) error {
 		if app.stopWatch != nil {
 			app.stopWatch()
 		}
+		if app.stopCommentsWatch != nil {
+			app.stopCommentsWatch()
+		}
 	}()
 
 	log.Printf("agentmark serving %s on http://127.0.0.1:%s", abs, cfg.Port)
@@ -211,6 +239,24 @@ func (a *App) snapshotThreads() []CommentThread {
 	return out
 }
 
+func (a *App) reloadThreadsFromSidecar() {
+	a.mu.Lock()
+	activePath := a.cfg.FilePath
+	current := a.content
+	threads, err := LoadThreads(activePath)
+	if err != nil {
+		a.mu.Unlock()
+		return
+	}
+	threads = ReanchorThreadsWithStore(current, threads, a.snapshots)
+	a.threads = threads
+	_ = SaveThreads(activePath, a.threads)
+	t := make([]CommentThread, len(a.threads))
+	copy(t, a.threads)
+	a.mu.Unlock()
+	a.broadcast(WSEvent{Type: "threads_update", Threads: t})
+}
+
 func (a *App) handleWS(w http.ResponseWriter, r *http.Request) {
 	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -220,6 +266,7 @@ func (a *App) handleWS(w http.ResponseWriter, r *http.Request) {
 	a.clients[c] = struct{}{}
 	a.wsMu.Unlock()
 
+	a.reloadThreadsFromSidecar()
 	a.mu.Lock()
 	path := a.cfg.FilePath
 	root := a.cfg.ProjectRoot
@@ -237,7 +284,9 @@ func (a *App) handleWS(w http.ResponseWriter, r *http.Request) {
 	a.mu.Unlock()
 	for _, ev := range init {
 		b, _ := json.Marshal(ev)
-		_ = c.WriteMessage(websocket.TextMessage, b)
+		a.wsMu.Lock()
+		_ = a.writeWSMessage(c, b)
+		a.wsMu.Unlock()
 	}
 
 	go func() {
