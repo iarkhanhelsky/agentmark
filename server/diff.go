@@ -212,3 +212,99 @@ func lineKey(h DiffHunk) int {
 	}
 	return h.OldLine
 }
+
+// oldToNewLineIndex maps each old line index to its corresponding new line index (-1 if deleted).
+func oldToNewLineIndex(oldLines, newLines []string) []int {
+	out := make([]int, len(oldLines))
+	for i := range out {
+		out[i] = -1
+	}
+	lcs := lcsTable(oldLines, newLines)
+	ops := walkLCS(oldLines, newLines, lcs)
+	for _, op := range ops {
+		if op.kind == opEqual && op.i >= 0 && op.i < len(out) {
+			out[op.i] = op.j
+		}
+	}
+	return out
+}
+
+func byteOffsetToLineIndex(text string, byteOff int) int {
+	if byteOff < 0 || byteOff > len(text) {
+		return -1
+	}
+	line := 0
+	for i := 0; i < byteOff && i < len(text); i++ {
+		if text[i] == '\n' {
+			line++
+		}
+	}
+	return line
+}
+
+func lineStartByteOffset(text string, lineIdx int) int {
+	if lineIdx <= 0 {
+		return 0
+	}
+	line := 0
+	for i := 0; i < len(text); i++ {
+		if text[i] == '\n' {
+			line++
+			if line == lineIdx {
+				return i + 1
+			}
+		}
+	}
+	return len(text)
+}
+
+// MapOldByteRangeToNew maps half-open byte range [start,end) in oldText into newText using line
+// alignment, after trying a direct substring carry-over.
+func MapOldByteRangeToNew(oldText, newText string, start, end int) (int, int, bool) {
+	if start < 0 || end > len(oldText) || start >= end {
+		return 0, 0, false
+	}
+	snippet := oldText[start:end]
+	if i := strings.Index(newText, snippet); i >= 0 {
+		return i, i + len(snippet), true
+	}
+	oldLines := splitLines(oldText)
+	newLines := splitLines(newText)
+	lineMap := oldToNewLineIndex(oldLines, newLines)
+	loLine := byteOffsetToLineIndex(oldText, start)
+	hiLine := byteOffsetToLineIndex(oldText, end-1)
+	if loLine < 0 || hiLine < 0 || loLine >= len(lineMap) || hiLine >= len(lineMap) {
+		return 0, 0, false
+	}
+	nLo := lineMap[loLine]
+	nHi := lineMap[hiLine]
+	if nLo < 0 || nHi < 0 {
+		return 0, 0, false
+	}
+	if nHi < nLo {
+		nLo, nHi = nHi, nLo
+	}
+	regionStart := lineStartByteOffset(newText, nLo)
+	regionEnd := lineStartByteOffset(newText, nHi+1)
+	if regionEnd > len(newText) {
+		regionEnd = len(newText)
+	}
+	if regionStart > regionEnd || regionStart >= len(newText) {
+		return 0, 0, false
+	}
+	region := newText[regionStart:regionEnd]
+	trimSnip := strings.TrimSpace(snippet)
+	if trimSnip == "" {
+		return 0, 0, false
+	}
+	idx := strings.Index(region, trimSnip)
+	if idx < 0 {
+		return 0, 0, false
+	}
+	ns := regionStart + idx
+	ne := ns + len(trimSnip)
+	if ne > len(newText) {
+		return 0, 0, false
+	}
+	return ns, ne, true
+}

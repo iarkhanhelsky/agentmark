@@ -94,17 +94,17 @@ func Start(ctx context.Context, cfg Config) error {
 	}
 	content := string(raw)
 
+	snapStore, err := NewSnapshotStore(abs)
+	if err != nil {
+		return err
+	}
+
 	threads, err := LoadThreads(abs)
 	if err != nil {
 		return err
 	}
-	threads = ReanchorThreads(content, threads)
+	threads = ReanchorThreadsWithStore(content, threads, snapStore)
 	if err := SaveThreads(abs, threads); err != nil {
-		return err
-	}
-
-	snapStore, err := NewSnapshotStore(abs)
-	if err != nil {
 		return err
 	}
 
@@ -138,7 +138,7 @@ func Start(ctx context.Context, cfg Config) error {
 		app.mu.Lock()
 		activePath := app.cfg.FilePath
 		app.content = newContent
-		app.threads = ReanchorThreads(newContent, app.threads)
+		app.threads = ReanchorThreadsWithStore(newContent, app.threads, app.snapshots)
 		_ = SaveThreads(activePath, app.threads)
 		app.mu.Unlock()
 		app.broadcast(WSEvent{Type: "file_update", Content: newContent})
@@ -283,7 +283,7 @@ func (a *App) handleUpsert(w http.ResponseWriter, r *http.Request) {
 			}
 			if hint >= 0 {
 				end := hint + len(strings.TrimSpace(req.AnchorText))
-				an := buildAnchor(a.content, hint, end)
+				an := BuildAnchor(a.content, hint, end)
 				a.threads[idx].Anchor = &an
 			}
 		}
@@ -301,7 +301,7 @@ func (a *App) handleUpsert(w http.ResponseWriter, r *http.Request) {
 			}
 			if hint >= 0 {
 				end := hint + len(strings.TrimSpace(req.AnchorText))
-				an := buildAnchor(a.content, hint, end)
+				an := BuildAnchor(a.content, hint, end)
 				t.Anchor = &an
 			}
 		}
@@ -312,7 +312,7 @@ func (a *App) handleUpsert(w http.ResponseWriter, r *http.Request) {
 		}
 		a.threads = append(a.threads, t)
 	}
-	a.threads = ReanchorThreads(a.content, a.threads)
+	a.threads = ReanchorThreadsWithStore(a.content, a.threads, a.snapshots)
 	_ = SaveThreads(a.cfg.FilePath, a.threads)
 	a.broadcast(WSEvent{Type: "threads_update", Threads: a.threads})
 	_, _ = w.Write([]byte(`{"ok":true}`))
@@ -440,7 +440,7 @@ func (a *App) handleResolve(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleDetached(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
-	a.threads = ReanchorThreads(a.content, a.threads)
+	a.threads = ReanchorThreadsWithStore(a.content, a.threads, a.snapshots)
 	_ = SaveThreads(a.cfg.FilePath, a.threads)
 	t := a.threads
 	a.mu.Unlock()
@@ -515,7 +515,7 @@ func (a *App) handleSnapshotsApply(w http.ResponseWriter, r *http.Request) {
 	}
 	a.mu.Lock()
 	a.content = next
-	a.threads = ReanchorThreads(next, a.threads)
+	a.threads = ReanchorThreadsWithStore(next, a.threads, a.snapshots)
 	_ = SaveThreads(a.cfg.FilePath, a.threads)
 	a.mu.Unlock()
 	a.broadcast(WSEvent{Type: "file_update", Content: next})

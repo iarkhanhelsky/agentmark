@@ -17,8 +17,18 @@
   <div class="app-layout" :class="{ 'history-open': historyOpen }">
     <aside class="file-tree" aria-label="Files">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">AM</span>
-        <span class="brand-name">AgentMark</span>
+        <svg class="brand-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+          <path
+            d="M4 14l4-4 4 4 8-8"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        <span class="brand-wordmark">
+          <span class="brand-agent">Agent</span><span class="brand-mark-text">Mark</span><span class="brand-prompt" aria-hidden="true">&gt;_</span>
+        </span>
       </div>
 
       <template x-for="section in projectTree.sections" :key="section.label || '__root__'">
@@ -109,6 +119,16 @@
                 <span class="toggle-switch-thumb" :class="{ on: showResolved }"></span>
               </button>
             </div>
+            <button
+              type="button"
+              class="toolbar-detached-chip"
+              x-show="detachedCount > 0"
+              @click="detachedPanelOpen = !detachedPanelOpen"
+              :title="detachedCount + ' comment(s) not linked to the document text'"
+            >
+              <i class="fa-solid fa-link-slash" aria-hidden="true"></i>
+              <span x-text="detachedCount + ' detached'"></span>
+            </button>
           </div>
           <button type="button" class="btn btn-ghost" @click="copyReviewContext()">Copy context</button>
           <button
@@ -125,6 +145,37 @@
           </button>
         </div>
       </header>
+
+      <div
+        class="detached-panel"
+        x-show="viewMode === 'preview' && detachedCount > 0 && detachedPanelOpen"
+        x-cloak
+        aria-label="Detached comments"
+      >
+        <div class="detached-panel-inner">
+          <p class="detached-panel-hint">
+            These threads are preserved but their anchor text no longer appears in the file (often after agent edits).
+            Select new text in the preview and use <strong>Re-attach</strong>, or run
+            <code class="inline-code">comments reattach</code> from the CLI.
+          </p>
+          <ul class="detached-list">
+            <template x-for="dt in detachedThreads" :key="dt.id">
+              <li class="detached-row">
+                <button
+                  type="button"
+                  class="detached-open-btn"
+                  @click="openThread(dt.id)"
+                  :title="dt.anchorText"
+                >
+                  <span class="detached-row-id" x-text="dt.id.slice(0, 8) + '…'"></span>
+                  <span class="detached-row-preview" x-text="threadPreview(dt)"></span>
+                  <span class="detached-row-badge" x-show="dt.resolved">resolved</span>
+                </button>
+              </li>
+            </template>
+          </ul>
+        </div>
+      </div>
 
       <div class="doc-scroll" id="doc-scroll" @scroll="onDocScroll()">
         <div class="doc-review-row" id="doc-review-row">
@@ -160,7 +211,7 @@
           <!-- Side rail: comment cards align here — never overlaps prose -->
           <div class="bubble-rail" id="bubble-rail" x-show="viewMode === 'preview'" aria-live="polite">
             <div
-              class="comment-bubble"
+              class="comment-bubble comment-thread-popover"
               x-show="activeThreadId && bubble.open && activeThread"
               x-cloak
               @click.stop
@@ -168,10 +219,7 @@
             >
               <div class="bubble-inner">
                 <div class="bubble-card-head">
-                  <span class="bubble-author">
-                    <i class="fa-solid fa-user" aria-hidden="true"></i>
-                    <span x-text="bubbleAuthorLabel(activeThread)"></span>
-                  </span>
+                  <span class="bubble-author">Thread</span>
                   <div class="bubble-head-actions">
                     <button
                       type="button"
@@ -196,24 +244,62 @@
                   </div>
                 </div>
                 <div class="bubble-card-body">
-                  <p
-                    class="bubble-anchor-line"
-                    x-show="activeThread && !(activeThread.thread || []).length"
-                    x-text="activeThread && activeThread.anchorText"
-                  ></p>
-                  <template x-for="(m, idx) in (activeThread && activeThread.thread) || []" :key="idx">
-                    <p class="bubble-msg" x-text="m.body"></p>
+                  <p class="bubble-detached-banner" x-show="activeThread && activeThread.detached" x-cloak>
+                    <i class="fa-solid fa-link-slash" aria-hidden="true"></i>
+                    Off-document — select text and use <strong>Re-attach</strong> in the toolbar chip menu, or the
+                    selection popover after highlighting text.
+                  </p>
+                  <div class="anchor-preview" x-show="activeThread && activeThread.anchorText">
+                    &ldquo;<span x-text="activeThread && activeThread.anchorText"></span>&rdquo;
+                  </div>
+                  <div class="thread-parent" x-show="activeThread">
+                    <div class="thread-row-head">
+                      <div
+                        class="thread-avatar thread-avatar-lg"
+                        :class="avatarClass(parentMessage(activeThread), true)"
+                        x-text="avatarLetter(parentMessage(activeThread), activeThread, true)"
+                      ></div>
+                      <span class="thread-author" x-text="messageAuthor(parentMessage(activeThread))"></span>
+                      <span class="thread-time" x-text="messageRelativeTime(parentMessage(activeThread))"></span>
+                    </div>
+                    <p class="thread-body" x-html="formatText(messageBody(parentMessage(activeThread)))"></p>
+                  </div>
+                  <div class="thread-replies" x-show="replyMessages(activeThread).length">
+                    <template x-for="(m, idx) in replyMessages(activeThread)" :key="idx">
+                      <div class="bubble-msg-row thread-reply-row" :class="messageRoleRowClass(m)">
+                        <div class="thread-row-head thread-row-head-reply">
+                          <div
+                            class="thread-avatar"
+                            :class="avatarClass(m, false)"
+                            x-text="avatarLetter(m, activeThread, false)"
+                          ></div>
+                          <span class="thread-author" x-text="messageAuthor(m)"></span>
+                          <span class="thread-time" x-text="messageRelativeTime(m)"></span>
+                        </div>
+                        <p class="bubble-msg-body thread-reply-body" x-html="formatText(m.body)"></p>
+                      </div>
+                    </template>
+                  </div>
+                  <p class="bubble-empty" x-show="!messageBody(parentMessage(activeThread))">
+                    Start the thread with a reply.
+                  </p>
+                  <template x-if="activeThread && !(activeThread.thread || []).length">
+                    <div class="bubble-msg-row bubble-msg-row--unknown">
+                      <p class="bubble-msg-body thread-reply-body">
+                        No replies yet.
+                      </p>
+                    </div>
                   </template>
                 </div>
                 <div class="bubble-card-footer">
                   <input
                     type="text"
                     class="bubble-reply-input"
-                    placeholder="Reply…"
+                    placeholder="Reply or use @mention..."
                     x-model="drafts[activeThreadId]"
                     @keydown.enter.prevent="sendReply(activeThreadId)"
                   />
-                  <button type="button" class="bubble-send-btn" @click="sendReply(activeThreadId)" title="Send">
+                  <button type="button" class="bubble-send-btn btn-send" @click="sendReply(activeThreadId)" title="Send">
                     <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
                   </button>
                 </div>
@@ -231,6 +317,16 @@
               <i class="fa-regular fa-comment-dots" aria-hidden="true"></i>
               Add Comment
             </button>
+            <template x-for="dt in detachedThreads" :key="'r-' + dt.id">
+              <button
+                type="button"
+                class="selection-popover-btn selection-popover-reattach"
+                @click="reattachThreadFromSelection(dt.id)"
+              >
+                <i class="fa-solid fa-link" aria-hidden="true"></i>
+                Re-attach <span class="selection-reattach-id" x-text="dt.id.slice(0, 8)"></span>…
+              </button>
+            </template>
           </div>
         </div>
       </div>

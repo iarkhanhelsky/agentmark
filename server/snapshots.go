@@ -2,7 +2,9 @@ package server
 
 import (
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +15,15 @@ import (
 	"time"
 )
 
+// If set (e.g. in tests), history paths are rooted at AGENTMARK_DATA_DIR/agentmark/...
+// instead of the OS app data directory.
+func dataDirRoot() (string, error) {
+	if d := strings.TrimSpace(os.Getenv("AGENTMARK_DATA_DIR")); d != "" {
+		return d, nil
+	}
+	return dataDir()
+}
+
 const maxSnapshots = 100
 
 // SnapshotStore manages version history outside the workspace.
@@ -22,6 +33,11 @@ type SnapshotStore struct {
 	dir          string
 	lastContent  string
 	pendingTimer *time.Timer
+}
+
+type snapshotMetaJSON struct {
+	Label string `json:"label,omitempty"`
+	Auto  bool   `json:"auto"`
 }
 
 func dataDir() (string, error) {
@@ -51,13 +67,37 @@ func dataDir() (string, error) {
 }
 
 func historyDirForFile(absFile string) (string, error) {
-	base, err := dataDir()
+	base, err := dataDirRoot()
 	if err != nil {
 		return "", err
 	}
 	h := sha1.Sum([]byte(absFile))
 	key := hex.EncodeToString(h[:])
 	return filepath.Join(base, "agentmark", "history", key), nil
+}
+
+func (s *SnapshotStore) metaPathFor(id string) string {
+	return filepath.Join(s.dir, id+".meta.json")
+}
+
+func (s *SnapshotStore) readMeta(id string) snapshotMetaJSON {
+	raw, err := os.ReadFile(s.metaPathFor(id))
+	if err != nil {
+		return snapshotMetaJSON{}
+	}
+	var m snapshotMetaJSON
+	if json.Unmarshal(raw, &m) != nil {
+		return snapshotMetaJSON{}
+	}
+	return m
+}
+
+func (s *SnapshotStore) writeMeta(id string, m snapshotMetaJSON) error {
+	raw, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.metaPathFor(id), append(raw, '\n'), 0o644)
 }
 
 // NewSnapshotStore creates a store for the given absolute markdown path.
@@ -94,9 +134,36 @@ func (s *SnapshotStore) List() ([]SnapshotMeta, error) {
 		if text != "" {
 			lines = len(strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n"))
 		}
-		out = append(out, SnapshotMeta{ID: id, TS: id, Lines: lines})
+		meta := s.readMeta(id)
+		out = append(out, SnapshotMeta{
+			ID: id, TS: id, Lines: lines,
+			Label: meta.Label, Auto: meta.Auto,
+		})
 	}
 	return out, nil
+}
+
+// ReadMatchingContentHash returns snapshot content whose SHA-256 equals hexWant (hex, lower-case).
+func (s *SnapshotStore) ReadMatchingContentHash(hexWant string) (string, bool) {
+	if hexWant == "" {
+		return "", false
+	}
+	want := strings.ToLower(hexWant)
+	names, err := s.listNames()
+	if err != nil {
+		return "", false
+	}
+	for _, n := range names {
+		raw, err := os.ReadFile(filepath.Join(s.dir, n))
+		if err != nil {
+			continue
+		}
+		sum := sha256.Sum256(raw)
+		if hex.EncodeToString(sum[:]) == want {
+			return string(raw), true
+		}
+	}
+	return "", false
 }
 
 // Read returns snapshot content by id (filename stem).
@@ -154,6 +221,9 @@ func (s *SnapshotStore) writeIfChanged(content string) (string, bool, error) {
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		return "", false, err
 	}
+	if err := s.writeMeta(id, snapshotMetaJSON{Auto: true}); err != nil {
+		return "", false, err
+	}
 	_ = s.pruneUnlocked()
 	return id, true, nil
 }
@@ -189,7 +259,9 @@ func (s *SnapshotStore) pruneUnlocked() error {
 		return err
 	}
 	for i := maxSnapshots; i < len(names); i++ {
+		baseID := strings.TrimSuffix(names[i], ".md")
 		_ = os.Remove(filepath.Join(s.dir, names[i]))
+		_ = os.Remove(s.metaPathFor(baseID))
 	}
 	return nil
 }
@@ -203,8 +275,41 @@ func (s *SnapshotStore) WriteSnapshotNow(content string) (string, error) {
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		return "", err
 	}
+	if err := s.writeMeta(id, snapshotMetaJSON{Auto: true}); err != nil {
+		return "", err
+	}
 	_ = s.pruneUnlocked()
 	return id, nil
+}
+
+// WriteSnapshotLabeled writes a snapshot with optional human label (not an auto-save).
+func (s *SnapshotStore) WriteSnapshotLabeled(content, label string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := snapshotIDNow()
+	p := filepath.Join(s.dir, id+".md")
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		return "", err
+	}
+	if err := s.writeMeta(id, snapshotMetaJSON{Label: label, Auto: false}); err != nil {
+		return "", err
+	}
+	_ = s.pruneUnlocked()
+	return id, nil
+}
+
+// LabelSnapshot sets or updates the label on an existing snapshot id.
+func (s *SnapshotStore) LabelSnapshot(id, label string) error {
+	if strings.Contains(id, "..") || strings.ContainsAny(id, `/\`) {
+		return fmt.Errorf("invalid id")
+	}
+	mdPath := filepath.Join(s.dir, id+".md")
+	if _, err := os.Stat(mdPath); err != nil {
+		return err
+	}
+	meta := s.readMeta(id)
+	meta.Label = label
+	return s.writeMeta(id, meta)
 }
 
 // Diff loads two snapshots and returns hunks.
@@ -218,4 +323,13 @@ func (s *SnapshotStore) Diff(leftID, rightID string) ([]DiffHunk, error) {
 		return nil, err
 	}
 	return LineDiff(left, right), nil
+}
+
+// DiffAgainstContent returns hunks from snapshot leftID to newText (e.g. working copy).
+func (s *SnapshotStore) DiffAgainstContent(leftID string, newText string) ([]DiffHunk, error) {
+	left, err := s.Read(leftID)
+	if err != nil {
+		return nil, err
+	}
+	return LineDiff(left, newText), nil
 }

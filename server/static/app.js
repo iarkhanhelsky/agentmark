@@ -29,9 +29,18 @@ function shell() {
     ws: null,
     _scrollScheduled: false,
     _pendingOpenId: null,
+    detachedPanelOpen: false,
 
     get visibleThreads() {
       return this.threads.filter((t) => !t.detached);
+    },
+
+    get detachedThreads() {
+      return this.threads.filter((t) => t.detached);
+    },
+
+    get detachedCount() {
+      return this.detachedThreads.length;
     },
 
     get commentCount() {
@@ -43,7 +52,9 @@ function shell() {
     },
 
     get activeThread() {
-      return this.visibleThreads.find((t) => t.id === this.activeThreadId) || null;
+      return this.activeThreadId
+        ? this.threads.find((t) => t.id === this.activeThreadId) || null
+        : null;
     },
 
     get diffRangeLabel() {
@@ -133,6 +144,7 @@ function shell() {
           this.render();
         } else if (msg.type === "threads_update") {
           this.threads = msg.threads || [];
+          if (this.detachedCount === 0) this.detachedPanelOpen = false;
           this.scheduleProjectTreeRefresh();
           if (this._pendingOpenId) {
             const pid = this._pendingOpenId;
@@ -156,7 +168,57 @@ function shell() {
       if (!thread) return "Comment";
       const msgs = thread.thread || [];
       if (!msgs.length) return "New note";
-      return "You";
+      const norm = (m) => (m && m.role ? String(m.role) : "").toLowerCase().trim();
+      const roles = new Set();
+      for (const m of msgs) {
+        const r = norm(m);
+        if (r) roles.add(r);
+      }
+      if (roles.size === 0) return "Thread";
+      if (roles.size === 1) {
+        const only = roles.values().next().value;
+        if (only === "user") return "You";
+        if (only === "agent") return "Agent";
+        return "Thread";
+      }
+      return "Thread";
+    },
+
+    messageRoleLabel(m) {
+      const r = (m && m.role ? String(m.role) : "").toLowerCase().trim();
+      if (r === "user") return "You";
+      if (r === "agent") return "Agent";
+      return "Comment";
+    },
+
+    messageRoleRowClass(m) {
+      const r = (m && m.role ? String(m.role) : "").toLowerCase().trim();
+      if (r === "user") return "bubble-msg-row--user";
+      if (r === "agent") return "bubble-msg-row--agent";
+      return "bubble-msg-row--unknown";
+    },
+
+    formatMessageTime(ts) {
+      if (ts == null || ts === "") return "";
+      const n = typeof ts === "number" ? ts : Number(ts);
+      if (!Number.isFinite(n) || n <= 0) return "";
+      const d = new Date(n);
+      if (Number.isNaN(d.getTime())) return "";
+      return d.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+    },
+
+    messageTimeISO(ts) {
+      if (ts == null || ts === "") return "";
+      const n = typeof ts === "number" ? ts : Number(ts);
+      if (!Number.isFinite(n) || n <= 0) return "";
+      const d = new Date(n);
+      if (Number.isNaN(d.getTime())) return "";
+      return d.toISOString();
     },
 
     render() {
@@ -258,12 +320,72 @@ function shell() {
         const rr = rail.getBoundingClientRect();
         let top = pr.top - rr.top + pr.height / 2 - 24;
         this.bubble = { open: true, top: Math.max(8, top) };
+        return;
       }
+      const rr = rail.getBoundingClientRect();
+      this.bubble = { open: true, top: Math.max(8, Math.min(48, rr.height * 0.15)) };
+    },
+
+    threadPreview(t) {
+      const s = ((t && t.anchorText) || "").trim().replace(/\s+/g, " ");
+      return s.length > 52 ? s.slice(0, 49) + "…" : s;
     },
 
     threadHasMessages(thread) {
       if (!thread) return false;
       return (thread.thread || []).some((m) => (m.body || "").trim() !== "");
+    },
+
+    parentMessage(thread) {
+      const msgs = ((thread && thread.thread) || []).filter((m) => (m.body || "").trim() !== "");
+      return msgs.length ? msgs[0] : null;
+    },
+
+    replyMessages(thread) {
+      const msgs = ((thread && thread.thread) || []).filter((m) => (m.body || "").trim() !== "");
+      return msgs.length > 1 ? msgs.slice(1) : [];
+    },
+
+    messageBody(msg) {
+      return msg && msg.body ? String(msg.body) : "";
+    },
+
+    messageAuthor(msg) {
+      const r = (msg && msg.role ? String(msg.role) : "").toLowerCase().trim();
+      if (r === "user") return "You";
+      if (r === "agent") return "Agent";
+      return "Comment";
+    },
+
+    messageRelativeTime(msg) {
+      if (!msg || msg.ts == null || msg.ts === "") return "";
+      const n = typeof msg.ts === "number" ? msg.ts : Number(msg.ts);
+      if (!Number.isFinite(n) || n <= 0) return "";
+      const deltaSeconds = Math.max(0, Math.floor((Date.now() - n) / 1000));
+      if (deltaSeconds < 60) return "now";
+      if (deltaSeconds < 3600) return `${Math.floor(deltaSeconds / 60)}m ago`;
+      if (deltaSeconds < 86400) return `${Math.floor(deltaSeconds / 3600)}h ago`;
+      return `${Math.floor(deltaSeconds / 86400)}d ago`;
+    },
+
+    avatarLetter(msg, thread, isLarge) {
+      const body = this.messageBody(msg).trim();
+      if (body) return this.messageAuthor(msg).charAt(0).toUpperCase();
+      if (isLarge && thread) return "T";
+      return "C";
+    },
+
+    avatarClass(msg, isLarge) {
+      const r = (msg && msg.role ? String(msg.role) : "").toLowerCase().trim();
+      if (r === "user") return isLarge ? "thread-avatar-user-lg" : "thread-avatar-user";
+      if (r === "agent") return isLarge ? "thread-avatar-agent-lg" : "thread-avatar-agent";
+      return isLarge ? "thread-avatar-neutral-lg" : "thread-avatar-neutral";
+    },
+
+    formatText(input) {
+      const escaped = escapeHtml(input || "");
+      const withMentions = escaped.replace(/(^|\s)@([a-zA-Z0-9._-]+)/g, '$1<span class="mention">@$2</span>');
+      return withMentions.replace(/\n/g, "<br>");
     },
 
     async deleteThread(threadId) {
@@ -377,6 +499,37 @@ function shell() {
       window.getSelection()?.removeAllRanges();
     },
 
+    async reattachThreadFromSelection(threadId) {
+      const span = findMarkdownSpan(this.markdown, this.sel.text);
+      let anchorText = this.sel.text;
+      let anchor = undefined;
+      if (span) {
+        anchorText = this.markdown.slice(span.start, span.end);
+        const p0 = Math.max(0, span.start - 40);
+        const s1 = Math.min(this.markdown.length, span.end + 40);
+        anchor = {
+          startOffset: span.start,
+          endOffset: span.end,
+          prefix: this.markdown.slice(p0, span.start),
+          suffix: this.markdown.slice(span.end, s1),
+        };
+      }
+      this._pendingOpenId = threadId;
+      const res = await fetch("/api/threads/upsert", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: threadId, anchorText, anchor }),
+      });
+      if (!res.ok) {
+        this._pendingOpenId = null;
+        alert(await res.text());
+        return;
+      }
+      this.toolbar.show = false;
+      this.detachedPanelOpen = false;
+      window.getSelection()?.removeAllRanges();
+    },
+
     async sendReply(threadId) {
       const body = (this.drafts[threadId] || "").trim();
       if (!body) return;
@@ -399,10 +552,14 @@ function shell() {
     copyReviewContext() {
       const path = this.fileMeta.name || "document";
       let out = `Review context for: ${path}\n\n`;
+      out +=
+        "When editing the document, keep quoted anchor text intact when possible. " +
+        "If a passage moves, re-attach the same thread id (see CLI: comments reattach --thread <id> --anchor \"…\").\n\n";
       let i = 1;
       for (const t of this.visibleThreads) {
         if (t.resolved && !this.showResolved) continue;
-        out += `[Thread ${i}] Anchor: ${JSON.stringify(t.anchorText)}\n`;
+        out += `[Thread ${i}] id: ${t.id}\n`;
+        out += `    Anchor: ${JSON.stringify(t.anchorText)}\n`;
         for (const m of t.thread || []) {
           out += `> ${m.role}: ${m.body}\n`;
         }
@@ -410,6 +567,18 @@ function shell() {
         if (d) out += `> (draft): ${d}\n`;
         out += "\n";
         i++;
+      }
+      const detached = this.detachedThreads.filter((t) => !t.resolved || this.showResolved);
+      if (detached.length) {
+        out += "\n--- [DETACHED: anchor text not found in file — re-attach after edits] ---\n\n";
+        for (const t of detached) {
+          out += `[Detached] id: ${t.id} resolved=${!!t.resolved}\n`;
+          out += `    Last anchor: ${JSON.stringify(t.anchorText)}\n`;
+          for (const m of t.thread || []) {
+            out += `> ${m.role}: ${m.body}\n`;
+          }
+          out += "\n";
+        }
       }
       out += "\n(Paste into your IDE agent chat.)\n";
       navigator.clipboard.writeText(out);
@@ -561,22 +730,49 @@ function wordsBridgePatternSource(plainChunk) {
   return words.map(escapeRegExp).join("[\\s\\S]*?");
 }
 
+/** Paragraph chunks split like markdown blank lines; used for preview highlighting. */
+function anchorParagraphBlocks(needleMd) {
+  const trimmed = (needleMd || "").trim();
+  if (!trimmed) return [];
+  return trimmed
+    .split(/\n\s*\n/)
+    .map((p) => stripBasicMarkdownForMatch(p.trim()))
+    .filter(Boolean);
+}
+
 /**
- * When markdown anchor text is not a literal substring of HTML (e.g. **bold** or blank lines between paragraphs).
+ * One <mark> per paragraph. A single mark must not wrap </p>…<p> — that is invalid HTML and breaks selection styling.
+ */
+function highlightSequentialParagraphMarks(html, blocks, threadId, cls) {
+  let cur = html;
+  let from = 0;
+  const open = () => `<mark data-thread-id="${threadId}" class="${cls}">`;
+  const close = `</mark>`;
+  for (const block of blocks) {
+    const src = wordsBridgePatternSource(block);
+    if (!src) return null;
+    const re = new RegExp(`(${src})`);
+    const sub = cur.slice(from);
+    const m = sub.match(re);
+    if (!m || m.index === undefined) return null;
+    const absStart = from + m.index;
+    const full = m[0];
+    const absEnd = absStart + full.length;
+    const o = open();
+    cur = cur.slice(0, absStart) + o + full + close + cur.slice(absEnd);
+    from = absStart + o.length + full.length + close.length;
+  }
+  return cur;
+}
+
+/**
+ * When markdown anchor text is not a literal substring of HTML (e.g. **bold**). Multi-paragraph anchors use highlightSequentialParagraphMarks instead.
  */
 function anchorHtmlPattern(needleMd) {
   const trimmed = (needleMd || "").trim();
   if (!trimmed) return null;
-  const blocks = trimmed
-    .split(/\n\s*\n/)
-    .map((p) => stripBasicMarkdownForMatch(p.trim()))
-    .filter(Boolean);
-  if (blocks.length >= 2) {
-    const pieces = blocks.map(wordsBridgePatternSource).filter(Boolean);
-    if (pieces.length >= 2) {
-      return new RegExp(`(${pieces.join("[\\s\\S]*?")})`, "");
-    }
-  }
+  const blocks = anchorParagraphBlocks(needleMd);
+  if (blocks.length >= 2) return null;
   const one = blocks.length === 1 ? blocks[0] : stripBasicMarkdownForMatch(trimmed);
   const src = wordsBridgePatternSource(one);
   if (src) return new RegExp(`(${src})`, "");
@@ -591,6 +787,14 @@ function highlightAnchors(html, threads, showResolved) {
     if (!needle) continue;
     const cls = t.resolved ? "anchor-mark resolved" : "anchor-mark";
     const wrapped = `<mark data-thread-id="${t.id}" class="${cls}">$1</mark>`;
+    const blocks = anchorParagraphBlocks(needle);
+    if (blocks.length >= 2) {
+      const next = highlightSequentialParagraphMarks(html, blocks, t.id, cls);
+      if (next) {
+        html = next;
+        continue;
+      }
+    }
     if (html.includes(needle)) {
       const re = new RegExp(`(${escapeRegExp(needle)})`, "");
       html = html.replace(re, wrapped);
@@ -708,4 +912,13 @@ function contextAroundSelection(full, selected) {
     prefix: full.slice(p0, idx),
     suffix: full.slice(idx + selected.length, s1),
   };
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }

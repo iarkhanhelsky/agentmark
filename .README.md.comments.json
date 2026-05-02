@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "threads": [
+    {
+      "id": "0009da9e-1386-4be1-b266-f641fb34fc80",
+      "anchorText": "AgentMark",
+      "anchor": {
+        "startOffset": 2,
+        "endOffset": 11,
+        "prefix": "# ",
+        "suffix": "\n\n**Motivation.** When you and an agent ",
+        "longPrefix": "# ",
+        "longSuffix": "\n\n**Motivation.** When you and an agent iterate on markdown, you need a quick way to leave feedback that stays tied to t"
+      },
+      "anchorNormalized": "AgentMark",
+      "anchorBasisHash": "a6e783d7613755096b8b279912115d3d1c584e15d149dc18323865d88cbd4ea4",
+      "resolved": true,
+      "thread": [
+        {
+          "role": "user",
+          "body": "Improve this section. We need:",
+          "ts": 1777729981865
+        },
+        {
+          "role": "user",
+          "body": "motivation -- quick way to give feedback to agents based when working on the documents",
+          "ts": 1777730009305
+        },
+        {
+          "role": "user",
+          "body": "how - let agents work collaboratively on the document based on the comments users provide",
+          "ts": 1777730039758
+        },
+        {
+          "role": "user",
+          "body": "Keep history of the document to quickly go through iterations and find lost changes - we can't commit every iteration to git - so we need automation to keep track of changes",
+          "ts": 1777730076820
+        },
+        {
+          "role": "agent",
+          "body": "README intro now covers motivation (fast anchored feedback), human+agent collaboration via UI/CLI, and snapshot history so iterations are not forced into git.",
+          "ts": 1777730230656
+        },
+        {
+          "role": "user",
+          "body": "@cursor improve this",
+          "ts": 1777731522171
+        }
+      ]
+    },
+    {
+      "id": "9e931614-0633-4d3a-b819-8137b63c8dc3",
+      "anchorText": "Get started",
+      "anchor": {
+        "startOffset": 861,
+        "endOffset": 872,
+        "prefix": "hout treating git as a scratch pad.\n\n## ",
+        "suffix": "\n\n1. **Install** — release packages ar",
+        "longPrefix": "utside the repo) so you can step through versions, diff, and recover wording without treating git as a scratch pad.\n\n## ",
+        "longSuffix": "\n\n1. **Install** — release packages are TBD. Until then, build from source (see [Development](#development)) or use th"
+      },
+      "anchorNormalized": "Get started",
+      "anchorBasisHash": "a6e783d7613755096b8b279912115d3d1c584e15d149dc18323865d88cbd4ea4",
+      "resolved": true,
+      "thread": [
+        {
+          "role": "user",
+          "body": "This section should be more user focused. Showing how to install (TBD) / run / and interact with the tool. Current instructions are more dev specific",
+          "ts": 1777730141054
+        },
+        {
+          "role": "agent",
+          "body": "Quick start reframed as Get started: install TBD, run, UI usage; dev build moved to Development.",
+          "ts": 1777730230905
+        }
+      ]
+    },
+    {
+      "id": "dbe9801d-8e87-4705-aa84-0ae7d53fdf31",
+      "anchorText": "Where data lives",
+      "anchor": {
+        "startOffset": 2969,
+        "endOffset": 2985,
+        "prefix": "ments reattach` to link them again.\n\n## ",
+        "suffix": "\n\nComment sidecars and snapshot paths ar",
+        "longPrefix": "HED]` section in the copied context; use **Re-attach** (select new text) or `comments reattach` to link them again.\n\n## ",
+        "longSuffix": "\n\nComment sidecars and snapshot paths are described in [docs/storage-and-history.md](docs/storage-and-history.md).\n\n## D"
+      },
+      "anchorNormalized": "Where data lives",
+      "anchorBasisHash": "a6e783d7613755096b8b279912115d3d1c584e15d149dc18323865d88cbd4ea4",
+      "thread": [
+        {
+          "role": "user",
+          "body": "This is low level implementation and should be moved to docs/ somewhere",
+          "ts": 1777730173430
+        },
+        {
+          "role": "agent",
+          "body": "Storage paths and snapshot behavior moved to docs/storage-and-history.md; README links there.",
+          "ts": 1777730231162
+        }
+      ]
+    },
+    {
+      "id": "52867d37-a632-45c4-9ce0-03dca73ff31d",
+      "anchorText": "Motivation.** When you and an agent iterate on markdown, you need a quick way to leave feedback that stays tied to the text—not another long paste into chat. AgentMark gives you anchored comment threads on the document so humans can steer and agents can respond with concrete edits.",
+      "anchor": {
+        "startOffset": 15,
+        "endOffset": 299,
+        "prefix": "# AgentMark\n\n**",
+        "suffix": "\n\n**Collaboration.** You work in the rev",
+        "longPrefix": "# AgentMark\n\n**",
+        "longSuffix": "\n\n**Collaboration.** You work in the review UI (or your IDE integration): add comments on passages, keep threads open un"
+      },
+      "anchorNormalized": "Motivation.** When you and an agent iterate on markdown, you need a quick way to leave feedback that stays tied to the text—not another long paste into chat. AgentMark gives you anchored comment threads on the document so humans can steer and agents can respond with concrete edits.",
+      "anchorBasisHash": "a6e783d7613755096b8b279912115d3d1c584e15d149dc18323865d88cbd4ea4",
+      "thread": [
+        {
+          "role": "user",
+          "body": "This is a test comment to check multiline input\n\nYou don't need to change anything. Just acknowledge and resolve",
+          "ts": 1777730496137
+        }
+      ]
+    }
+  ]
+}

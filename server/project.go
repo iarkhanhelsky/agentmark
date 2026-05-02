@@ -236,15 +236,15 @@ func (a *App) switchToFile(abs string) error {
 		return err
 	}
 	content := string(raw)
-	threads, err := LoadThreads(abs)
-	if err != nil {
-		return err
-	}
-	threads = ReanchorThreads(content, threads)
 	snapStore, err := NewSnapshotStore(abs)
 	if err != nil {
 		return err
 	}
+	threads, err := LoadThreads(abs)
+	if err != nil {
+		return err
+	}
+	threads = ReanchorThreadsWithStore(content, threads, snapStore)
 
 	a.mu.Lock()
 	if a.stopWatch != nil {
@@ -263,7 +263,7 @@ func (a *App) switchToFile(abs string) error {
 		a.mu.Lock()
 		activePath := a.cfg.FilePath
 		a.content = newContent
-		a.threads = ReanchorThreads(newContent, a.threads)
+		a.threads = ReanchorThreadsWithStore(newContent, a.threads, a.snapshots)
 		_ = SaveThreads(activePath, a.threads)
 		a.mu.Unlock()
 		a.broadcast(WSEvent{Type: "file_update", Content: newContent})

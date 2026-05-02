@@ -13,16 +13,22 @@ type CommentAnchor struct {
 	EndOffset   int    `json:"endOffset"`
 	Prefix      string `json:"prefix"`
 	Suffix      string `json:"suffix"`
+	LongPrefix  string `json:"longPrefix,omitempty"`
+	LongSuffix  string `json:"longSuffix,omitempty"`
 }
 
 // CommentThread is one anchored review thread.
 type CommentThread struct {
-	ID         string           `json:"id"`
-	AnchorText string           `json:"anchorText"`
-	Anchor     *CommentAnchor   `json:"anchor,omitempty"`
-	Detached   bool             `json:"detached,omitempty"`
-	Resolved   bool             `json:"resolved,omitempty"`
-	Thread     []CommentMessage `json:"thread"`
+	ID         string         `json:"id"`
+	AnchorText string         `json:"anchorText"`
+	Anchor     *CommentAnchor `json:"anchor,omitempty"`
+	// AnchorNormalized is whitespace-collapsed anchor text for fallback matching.
+	AnchorNormalized string `json:"anchorNormalized,omitempty"`
+	// AnchorBasisHash is sha256 hex of the full markdown file when this thread last anchored successfully.
+	AnchorBasisHash string           `json:"anchorBasisHash,omitempty"`
+	Detached        bool             `json:"detached,omitempty"`
+	Resolved        bool             `json:"resolved,omitempty"`
+	Thread          []CommentMessage `json:"thread"`
 }
 
 // CommentsFile is the on-disk sidecar shape.
@@ -86,6 +92,8 @@ type SnapshotMeta struct {
 	ID    string `json:"id"`
 	TS    string `json:"ts"`
 	Lines int    `json:"lines"`
+	Label string `json:"label,omitempty"`
+	Auto  bool   `json:"auto,omitempty"`
 }
 
 // DiffHunk is one change block between two snapshots.

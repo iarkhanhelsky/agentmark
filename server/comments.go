@@ -1,11 +1,18 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
+
+const anchorWindowShort = 40
+const anchorWindowLong = 120
 
 // CommentsPathFor returns the sidecar path for a markdown file.
 func CommentsPathFor(filePath string) string {
@@ -83,14 +90,60 @@ func occurrenceIndices(haystack, needle string) []int {
 	return out
 }
 
-func buildAnchor(markdown string, startOffset, endOffset int) CommentAnchor {
-	prefixStart := max(0, startOffset-40)
-	suffixEnd := min(len(markdown), endOffset+40)
+// NormalizeAnchorText collapses whitespace to single spaces (for fallback matching).
+func NormalizeAnchorText(s string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+}
+
+func contentHashHex(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
+}
+
+// collapseWhitespaceWithIndex builds a whitespace-collapsed view of s and a parallel
+// byteIndex where byteIndex[i] is the byte offset in s for collapsed[i].
+func collapseWhitespaceWithIndex(s string) (collapsed string, byteIndex []int) {
+	var b strings.Builder
+	byteIndex = make([]int, 0, len(s))
+	inWS := false
+	for i := 0; i < len(s); {
+		r, w := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && w == 1 {
+			i++
+			continue
+		}
+		if unicode.IsSpace(r) {
+			if !inWS {
+				b.WriteByte(' ')
+				byteIndex = append(byteIndex, i)
+				inWS = true
+			}
+			i += w
+			continue
+		}
+		inWS = false
+		for j := 0; j < w; j++ {
+			byteIndex = append(byteIndex, i+j)
+		}
+		b.WriteString(s[i : i+w])
+		i += w
+	}
+	return b.String(), byteIndex
+}
+
+// BuildAnchor captures prefix/suffix context around a span in markdown.
+func BuildAnchor(markdown string, startOffset, endOffset int) CommentAnchor {
+	prefixStart := max(0, startOffset-anchorWindowShort)
+	suffixEnd := min(len(markdown), endOffset+anchorWindowShort)
+	longPre := max(0, startOffset-anchorWindowLong)
+	longSuf := min(len(markdown), endOffset+anchorWindowLong)
 	return CommentAnchor{
 		StartOffset: startOffset,
 		EndOffset:   endOffset,
 		Prefix:      markdown[prefixStart:startOffset],
 		Suffix:      markdown[endOffset:suffixEnd],
+		LongPrefix:  markdown[longPre:startOffset],
+		LongSuffix:  markdown[endOffset:longSuf],
 	}
 }
 
@@ -112,17 +165,35 @@ func chooseBestAnchorIndex(markdown string, thread CommentThread) int {
 	a := thread.Anchor
 	for _, startOffset := range candidates {
 		endOffset := startOffset + len(anchorText)
-		prefixStart := max(0, startOffset-40)
-		suffixEnd := min(len(markdown), endOffset+40)
+		prefixStart := max(0, startOffset-anchorWindowShort)
+		suffixEnd := min(len(markdown), endOffset+anchorWindowShort)
 		prefix := markdown[prefixStart:startOffset]
 		suffix := markdown[endOffset:suffixEnd]
 		prefixHit := 0.0
 		if strings.HasSuffix(prefix, a.Prefix) {
 			prefixHit = 1
 		}
+		if prefixHit < 1 && len(a.LongPrefix) >= 8 && len(prefix) >= 8 {
+			tail := a.LongPrefix
+			if len(tail) > 24 {
+				tail = tail[len(tail)-24:]
+			}
+			if strings.HasSuffix(prefix, tail) {
+				prefixHit = 1
+			}
+		}
 		suffixHit := 0.0
 		if strings.HasPrefix(suffix, a.Suffix) {
 			suffixHit = 1
+		}
+		if suffixHit < 1 && len(a.LongSuffix) >= 8 && len(suffix) >= 8 {
+			head := a.LongSuffix
+			if len(head) > 24 {
+				head = head[:24]
+			}
+			if strings.HasPrefix(suffix, head) {
+				suffixHit = 1
+			}
 		}
 		distance := abs(startOffset - a.StartOffset)
 		score := prefixHit*2 + suffixHit*2 - float64(distance)/1000
@@ -150,22 +221,149 @@ func resolveAnchorLocation(markdown string, thread CommentThread) (startOffset, 
 	return start, end, true
 }
 
+func resolveNormalizedAnchored(markdown, needleNorm string) (startOffset, endOffset int, ok bool) {
+	needleNorm = strings.TrimSpace(needleNorm)
+	if needleNorm == "" || markdown == "" {
+		return 0, 0, false
+	}
+	collapsedDoc, idxDoc := collapseWhitespaceWithIndex(markdown)
+	if len(collapsedDoc) != len(idxDoc) {
+		return 0, 0, false
+	}
+	sub := strings.Index(collapsedDoc, needleNorm)
+	if sub < 0 {
+		return 0, 0, false
+	}
+	endSub := sub + len(needleNorm)
+	if endSub > len(collapsedDoc) || sub < 0 {
+		return 0, 0, false
+	}
+	startByte := idxDoc[sub]
+	endByte := idxDoc[endSub-1] + 1
+	if startByte < 0 || endByte > len(markdown) || startByte >= endByte {
+		return 0, 0, false
+	}
+	return startByte, endByte, true
+}
+
+func resolveBracketAnchored(markdown string, thread CommentThread) (startOffset, endOffset int, ok bool) {
+	a := thread.Anchor
+	if a == nil {
+		return 0, 0, false
+	}
+	pre := a.LongPrefix
+	suf := a.LongSuffix
+	if len(pre) < 8 {
+		pre = a.Prefix
+	}
+	if len(suf) < 8 {
+		suf = a.Suffix
+	}
+	if len(pre) < 8 || len(suf) < 8 {
+		return 0, 0, false
+	}
+	const maxSpan = 8000
+	var hits [][2]int
+	searchFrom := 0
+	for {
+		i := strings.Index(markdown[searchFrom:], pre)
+		if i < 0 {
+			break
+		}
+		abs := searchFrom + i
+		afterPre := abs + len(pre)
+		rest := markdown[afterPre:]
+		j := strings.Index(rest, suf)
+		if j >= 0 && j <= maxSpan {
+			innerStart := afterPre
+			innerEnd := afterPre + j
+			if innerEnd > innerStart {
+				hits = append(hits, [2]int{innerStart, innerEnd})
+			}
+		}
+		searchFrom = abs + 1
+	}
+	if len(hits) != 1 {
+		return 0, 0, false
+	}
+	return hits[0][0], hits[0][1], true
+}
+
+func tryRemapFromSnapshot(snap *SnapshotStore, thread CommentThread, newMarkdown string) (startOffset, endOffset int, ok bool) {
+	if snap == nil || thread.AnchorBasisHash == "" || thread.Anchor == nil {
+		return 0, 0, false
+	}
+	oldContent, found := snap.ReadMatchingContentHash(thread.AnchorBasisHash)
+	if !found {
+		return 0, 0, false
+	}
+	a := thread.Anchor
+	if a.StartOffset < 0 || a.EndOffset > len(oldContent) || a.StartOffset >= a.EndOffset {
+		return 0, 0, false
+	}
+	return MapOldByteRangeToNew(oldContent, newMarkdown, a.StartOffset, a.EndOffset)
+}
+
+func reanchorOneThread(markdown string, thread CommentThread, snap *SnapshotStore) CommentThread {
+	hNorm := strings.TrimSpace(thread.AnchorNormalized)
+	if hNorm == "" {
+		hNorm = NormalizeAnchorText(thread.AnchorText)
+	}
+
+	start, end, ok := resolveAnchorLocation(markdown, thread)
+	if ok {
+		return finalizeReanchored(thread, markdown, start, end, hNorm)
+	}
+	if hNorm != "" {
+		if start, end, ok = resolveNormalizedAnchored(markdown, hNorm); ok {
+			return finalizeReanchored(thread, markdown, start, end, hNorm)
+		}
+	}
+	if start, end, ok = resolveBracketAnchored(markdown, thread); ok {
+		return finalizeReanchored(thread, markdown, start, end, hNorm)
+	}
+	if start, end, ok = tryRemapFromSnapshot(snap, thread, markdown); ok {
+		return finalizeReanchored(thread, markdown, start, end, hNorm)
+	}
+
+	t := thread
+	t.Detached = true
+	return t
+}
+
+func finalizeReanchored(thread CommentThread, markdown string, start, end int, hNorm string) CommentThread {
+	t := thread
+	t.Detached = false
+	if end > len(markdown) {
+		end = len(markdown)
+	}
+	if start < 0 || start >= end {
+		t.Detached = true
+		return t
+	}
+	t.AnchorText = markdown[start:end]
+	an := BuildAnchor(markdown, start, end)
+	t.Anchor = &an
+	if hNorm == "" {
+		t.AnchorNormalized = NormalizeAnchorText(t.AnchorText)
+	} else {
+		t.AnchorNormalized = hNorm
+	}
+	t.AnchorBasisHash = contentHashHex(markdown)
+	return t
+}
+
 // ReanchorThreads updates anchors and detached flags from current markdown.
 func ReanchorThreads(markdown string, input []CommentThread) []CommentThread {
+	return ReanchorThreadsWithStore(markdown, input, nil)
+}
+
+// ReanchorThreadsWithStore is like ReanchorThreads but uses snapshot history to remap offsets
+// when AnchorBasisHash matches a stored version.
+func ReanchorThreadsWithStore(markdown string, input []CommentThread, snap *SnapshotStore) []CommentThread {
 	out := make([]CommentThread, len(input))
-	for i, thread := range input {
-		start, end, ok := resolveAnchorLocation(markdown, thread)
-		if !ok {
-			t := thread
-			t.Detached = true
-			out[i] = t
-			continue
-		}
-		t := thread
-		t.Detached = false
-		a := buildAnchor(markdown, start, end)
-		t.Anchor = &a
-		out[i] = t
+	for i := range input {
+		out[i] = reanchorOneThread(markdown, input[i], snap)
 	}
 	return out
 }
