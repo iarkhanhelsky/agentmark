@@ -42,6 +42,7 @@ agentmark comments list ./doc.md
 agentmark comments list ./doc.md --open        # unresolved && !detached
 agentmark comments list ./doc.md --resolved    # only resolved
 agentmark comments list ./doc.md --detached    # only detached
+agentmark comments list ./doc.md --awaiting-agent  # last message is user (reply queue)
 ```
 
 **List threads for every `*.md` under a directory** (recursive walk). JSON shape:
@@ -50,7 +51,10 @@ agentmark comments list ./doc.md --detached    # only detached
 ```bash
 agentmark comments list .
 agentmark comments list ./docs --open
+agentmark comments list . --open --awaiting-agent   # actionable open threads waiting on an agent
 ```
+
+Make `comments list` your default first step before substantive edits so thread context is loaded before you decide what to rewrite.
 
 ### Message body format (`--role agent`)
 
@@ -73,7 +77,7 @@ agentmark comments add ./doc.md --anchor "exact substring" --body "..." [--role 
 agentmark comments reply ./doc.md --thread <id> --body "..." [--role agent]
 ```
 
-**Resolve / reopen** (manual control; do not use for routine agent triage):
+**Resolve / reopen** (manual control):
 
 ```bash
 agentmark comments resolve ./doc.md --thread <id>
@@ -81,10 +85,51 @@ agentmark comments unresolve ./doc.md --thread <id>
 ```
 
 Agent behavior rule:
-- Do **not** resolve threads as part of normal agent workflow.
+- Do **not** resolve threads as part of agent workflow. Resolution stays human-owned.
 - Instead, surface open threads requiring agent action:
   - open thread where the latest message is from `user` (agent reply required)
   - open thread explicitly requesting an action from the agent
+
+## Rewriting documents (agent-owned edits)
+
+Tier-0 rule: when you rewrite content, preserve thread intent during the same task. Do not defer this to later cleanup.
+
+1. Before rewriting, run:
+
+```bash
+agentmark comments list ./doc.md --open
+```
+
+Capture thread IDs in the region you are about to modify.
+
+2. Perform the rewrite.
+
+3. In the same task, declare disposition for each affected thread:
+   - Reattach to new text:
+
+```bash
+agentmark comments reattach ./doc.md --thread <id> --anchor "new exact substring in updated doc"
+```
+
+   - And/or reply with outcome when context changed or a human should close it:
+
+```bash
+agentmark comments reply ./doc.md --thread <id> --body "Cursor
+
+Updated section X to address Y; please resolve if this is now complete." --role agent
+```
+
+Never use `comments resolve` as an agent.
+
+Closure check before finishing a rewrite task:
+
+```bash
+agentmark comments list ./doc.md --detached
+```
+
+If detachments remain, reattach what you can and explain any remaining cases in thread replies for human review.
+
+Algorithm safety net: server-side re-anchoring helps when mappings are missed, but explicit agent reattach is preferred whenever you know the semantic mapping at rewrite time.
 
 ## Snapshots
 
@@ -121,11 +166,12 @@ agentmark snapshot diff ./doc.md --a <id> --b <other-id>
 
 ## Workflow recipe
 
-1. `agentmark comments list ./doc.md --open` — pick thread ids.
+1. `agentmark comments list ./doc.md --open` — gather active thread context first.
 2. Edit the markdown in your editor or patch tool.
-3. `agentmark comments reply ./doc.md --thread <id> --body "..." --role agent`
-4. Report remaining open threads that still require agent reply/action.
-5. `agentmark snapshot save ./doc.md --label "checkpoint"` before large edits.
+3. If rewrites touched anchored content, run `comments reattach` per affected thread.
+4. `agentmark comments reply ./doc.md --thread <id> --body "..." --role agent` with what changed.
+5. `agentmark comments list ./doc.md --detached` and clear or explain detachments.
+6. `agentmark snapshot save ./doc.md --label "checkpoint"` before or after large edits.
 
 ## Install this skill
 

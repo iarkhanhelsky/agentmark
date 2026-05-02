@@ -90,6 +90,66 @@ func TestIntegrationCommentsLifecycle(t *testing.T) {
 	}
 }
 
+func TestIntegrationCommentsListAwaitingAgent(t *testing.T) {
+	t.Setenv("AGENTMARK_DATA_DIR", t.TempDir())
+
+	root := t.TempDir()
+	md := filepath.Join(root, "doc.md")
+	writeFile(t, md, "# T\n\nAlpha\n\nBeta\n\nGamma\n")
+
+	runCLI(t, []string{
+		"comments", "add", md,
+		"--anchor", "Alpha",
+		"--body", "Please review",
+		"--role", "user",
+	})
+	betaAdd := runCLI(t, []string{
+		"comments", "add", md,
+		"--anchor", "Beta",
+		"--body", "Question",
+		"--role", "user",
+	})
+	if betaAdd.err != nil {
+		t.Fatalf("add beta: %v stderr=%s", betaAdd.err, betaAdd.stderr)
+	}
+	betaID, _ := decodeJSONMap(t, betaAdd.stdout)["threadId"].(string)
+	if betaID == "" {
+		t.Fatalf("missing beta threadId: %s", betaAdd.stdout)
+	}
+	runCLI(t, []string{
+		"comments", "reply", md,
+		"--thread", betaID,
+		"--body", "Cursor\n\nAnswered.",
+		"--role", "agent",
+	})
+	gammaAdd := runCLI(t, []string{
+		"comments", "add", md,
+		"--anchor", "Gamma",
+		"--body", "Cursor\n\nFirst agent",
+		"--role", "agent",
+	})
+	if gammaAdd.err != nil {
+		t.Fatalf("add gamma: %v stderr=%s", gammaAdd.err, gammaAdd.stderr)
+	}
+	gammaID, _ := decodeJSONMap(t, gammaAdd.stdout)["threadId"].(string)
+	runCLI(t, []string{
+		"comments", "reply", md,
+		"--thread", gammaID,
+		"--body", "Follow-up from human",
+		"--role", "user",
+	})
+
+	list := runCLI(t, []string{"comments", "list", md, "--awaiting-agent"})
+	if list.err != nil {
+		t.Fatalf("list awaiting-agent: %v stderr=%s", list.err, list.stderr)
+	}
+	obj := decodeJSONMap(t, list.stdout)
+	threads, _ := obj["threads"].([]any)
+	if len(threads) != 2 {
+		t.Fatalf("expected 2 threads awaiting agent, got %d body=%s", len(threads), list.stdout)
+	}
+}
+
 func TestIntegrationCommentsListDirectory(t *testing.T) {
 	t.Setenv("AGENTMARK_DATA_DIR", t.TempDir())
 
@@ -306,6 +366,82 @@ func TestIntegrationCommentsAgentIntroValidation(t *testing.T) {
 		})
 		if got.err != nil {
 			t.Fatalf("expected success for role=user: %v stderr=%s", got.err, got.stderr)
+		}
+	})
+}
+
+func TestIntegrationCommentsErgonomicsAndAudit(t *testing.T) {
+	t.Setenv("AGENTMARK_DATA_DIR", t.TempDir())
+	root := t.TempDir()
+	md := filepath.Join(root, "doc.md")
+	writeFile(t, md, "# Title\n\nAlpha line\n\nBeta line\n")
+
+	add := runCLI(t, []string{
+		"comments", "add", md,
+		"--anchor", "Alpha line",
+		"--body", "Cursor\n\ninitial",
+		"--role", "agent",
+	})
+	if add.err != nil {
+		t.Fatalf("seed add error: %v stderr=%s", add.err, add.stderr)
+	}
+	threadID, _ := decodeJSONMap(t, add.stdout)["threadId"].(string)
+	if threadID == "" {
+		t.Fatalf("missing threadId from add: %s", add.stdout)
+	}
+
+	t.Run("list accepts --json no-op", func(t *testing.T) {
+		got := runCLI(t, []string{"comments", "list", md, "--json"})
+		if got.err != nil {
+			t.Fatalf("list --json error: %v stderr=%s", got.err, got.stderr)
+		}
+		obj := decodeJSONMap(t, got.stdout)
+		threads, _ := obj["threads"].([]any)
+		if len(threads) != 1 {
+			t.Fatalf("expected one thread from list --json, got %d body=%s", len(threads), got.stdout)
+		}
+	})
+
+	t.Run("reattach-apply alias works like reattach", func(t *testing.T) {
+		got := runCLI(t, []string{
+			"comments", "reattach-apply", md,
+			"--thread", threadID,
+			"--anchor", "Beta line",
+		})
+		if got.err != nil {
+			t.Fatalf("reattach-apply error: %v stderr=%s", got.err, got.stderr)
+		}
+		obj := decodeJSONMap(t, got.stdout)
+		threads, _ := obj["threads"].([]any)
+		if len(threads) != 1 {
+			t.Fatalf("expected one thread after reattach-apply, got %d body=%s", len(threads), got.stdout)
+		}
+	})
+
+	t.Run("audit warns and supports strict failure", func(t *testing.T) {
+		writeFile(t, md, "# Title\n\nGamma section\n\nDelta section\n")
+
+		nonStrict := runCLI(t, []string{"comments", "audit", md})
+		if nonStrict.err != nil {
+			t.Fatalf("audit non-strict should not fail: %v stderr=%s", nonStrict.err, nonStrict.stderr)
+		}
+		if !strings.Contains(nonStrict.stderr, "WARNING:") {
+			t.Fatalf("expected warning on stderr, got %q", nonStrict.stderr)
+		}
+		obj := decodeJSONMap(t, nonStrict.stdout)
+		if n, _ := obj["detachedOpen"].(float64); n < 1 {
+			t.Fatalf("expected detachedOpen >= 1, got %v body=%s", obj["detachedOpen"], nonStrict.stdout)
+		}
+
+		strict := runCLI(t, []string{"comments", "audit", md, "--strict"})
+		if strict.err == nil {
+			t.Fatalf("audit --strict should fail when detached unresolved threads exist")
+		}
+		if !strings.Contains(strict.stderr, "WARNING:") {
+			t.Fatalf("expected warning on strict stderr, got %q", strict.stderr)
+		}
+		if !strings.Contains(strict.stderr, `{"error":"detached unresolved threads found"}`) {
+			t.Fatalf("expected JSON error on strict stderr, got %q", strict.stderr)
 		}
 	})
 }

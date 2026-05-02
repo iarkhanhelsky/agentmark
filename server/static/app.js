@@ -1022,10 +1022,73 @@ function mdVisiblePlainWithMap(markdown) {
   const mdIdx = [];
   const n = markdown.length;
   let i = 0;
+  let atLineStart = true;
   while (i < n) {
     if (markdown[i] === "\r") {
       i++;
       continue;
+    }
+    if (atLineStart) {
+      /* Strip markdown line-prefix syntax that is not visible in preview text. */
+      let j = i;
+      while (j < n && (markdown[j] === " " || markdown[j] === "\t")) j++;
+      while (j < n && markdown[j] === ">") {
+        j++;
+        if (j < n && markdown[j] === " ") j++;
+        while (j < n && (markdown[j] === " " || markdown[j] === "\t")) j++;
+      }
+      /* Heading marker: ## ... */
+      {
+        let k = j;
+        let hashes = 0;
+        while (k < n && markdown[k] === "#" && hashes < 6) {
+          k++;
+          hashes++;
+        }
+        if (hashes > 0 && k < n && (markdown[k] === " " || markdown[k] === "\t")) {
+          while (k < n && (markdown[k] === " " || markdown[k] === "\t")) k++;
+          j = k;
+        }
+      }
+      /* List markers: -, *, +, 1. */
+      {
+        let k = j;
+        let advanced = false;
+        if (k < n && (markdown[k] === "-" || markdown[k] === "*" || markdown[k] === "+")) {
+          k++;
+          if (k < n && (markdown[k] === " " || markdown[k] === "\t")) {
+            while (k < n && (markdown[k] === " " || markdown[k] === "\t")) k++;
+            advanced = true;
+          }
+        } else {
+          let d = k;
+          while (d < n && markdown[d] >= "0" && markdown[d] <= "9") d++;
+          if (d > k && d < n && (markdown[d] === "." || markdown[d] === ")")) {
+            d++;
+            if (d < n && (markdown[d] === " " || markdown[d] === "\t")) {
+              while (d < n && (markdown[d] === " " || markdown[d] === "\t")) d++;
+              k = d;
+              advanced = true;
+            }
+          }
+        }
+        if (advanced) {
+          /* Task list marker: [ ] / [x] / [X] */
+          if (
+            k+2 < n &&
+            markdown[k] === "[" &&
+            (markdown[k+1] === " " || markdown[k+1] === "x" || markdown[k+1] === "X") &&
+            markdown[k+2] === "]"
+          ) {
+            k += 3;
+            while (k < n && (markdown[k] === " " || markdown[k] === "\t")) k++;
+          }
+          j = k;
+        }
+      }
+      if (j > i) {
+        i = j;
+      }
     }
     if (markdown.startsWith("**", i)) {
       i += 2;
@@ -1036,6 +1099,7 @@ function mdVisiblePlainWithMap(markdown) {
         }
         plainChars.push(markdown[i]);
         mdIdx.push(i);
+        atLineStart = markdown[i] === "\n";
         i++;
       }
       if (markdown.startsWith("**", i)) i += 2;
@@ -1050,6 +1114,7 @@ function mdVisiblePlainWithMap(markdown) {
         }
         plainChars.push(markdown[i]);
         mdIdx.push(i);
+        atLineStart = markdown[i] === "\n";
         i++;
       }
       if (markdown[i] === "`") i++;
@@ -1057,6 +1122,7 @@ function mdVisiblePlainWithMap(markdown) {
     }
     plainChars.push(markdown[i]);
     mdIdx.push(i);
+    atLineStart = markdown[i] === "\n";
     i++;
   }
   return { plain: plainChars.join(""), mdIdx };

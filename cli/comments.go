@@ -53,7 +53,9 @@ For --role agent (default on add/reply), the first line of --body must identify
 the source of the message:
   - Main chat/session: the tool/CLI name (e.g. "Cursor", "Claude", "Codex").
   - Subagent task: the stable subagent identifier prefixed with @ (e.g. "@explore").
-Put a blank line after the intro before substantive text when it helps readability.`,
+Put a blank line after the intro before substantive text when it helps readability.
+
+comments list --awaiting-agent narrows to threads whose last message is role user (typical agent reply queue).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
@@ -67,6 +69,7 @@ Put a blank line after the intro before substantive text when it helps readabili
 		newCommentsReplyCommand(),
 		newCommentsResolveCommand("resolve", true),
 		newCommentsResolveCommand("unresolve", false),
+		newCommentsAuditCommand(),
 	)
 	return cmd
 }
@@ -91,6 +94,21 @@ func filterCommentThreads(threads []server.CommentThread, openOnly, resolvedOnly
 		filtered = append(filtered, t)
 	}
 	return filtered
+}
+
+// filterAwaitingAgentReply keeps threads whose last message is role "user" (typical queue for an agent reply).
+func filterAwaitingAgentReply(threads []server.CommentThread) []server.CommentThread {
+	out := make([]server.CommentThread, 0, len(threads))
+	for _, t := range threads {
+		n := len(t.Thread)
+		if n == 0 {
+			continue
+		}
+		if t.Thread[n-1].Role == "user" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // listThreadsForMarkdown loads sidecar, re-anchors against markdown, optionally persists, returns filtered threads.
@@ -118,12 +136,13 @@ func listThreadsForMarkdown(abs string, openOnly, resolvedOnly, detachedOnly, al
 }
 
 func newCommentsListCommand() *cobra.Command {
-	var resolvedOnly, detachedOnly, openOnly bool
+	var resolvedOnly, detachedOnly, openOnly, awaitingAgent, jsonOut bool
 	c := &cobra.Command{
 		Use:   "list <file.md|dir>",
 		Short: "List comment threads for a markdown file or all .md files under a directory",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			_ = jsonOut // output is always JSON; flag is kept for ergonomics.
 			abs, isDir, err := AbsExistingPath(args[0])
 			if err != nil {
 				WriteError(err)
@@ -132,12 +151,19 @@ func newCommentsListCommand() *cobra.Command {
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
 			enc.SetEscapeHTML(false)
+			applyAwaiting := func(threads []server.CommentThread) []server.CommentThread {
+				if !awaitingAgent {
+					return threads
+				}
+				return filterAwaitingAgentReply(threads)
+			}
 			if !isDir {
 				filtered, err := listThreadsForMarkdown(abs, openOnly, resolvedOnly, detachedOnly, true)
 				if err != nil {
 					WriteError(err)
 					return ErrAlreadyReported
 				}
+				filtered = applyAwaiting(filtered)
 				if err := enc.Encode(map[string]any{"file": abs, "threads": filtered}); err != nil {
 					WriteError(err)
 					return ErrAlreadyReported
@@ -169,6 +195,7 @@ func newCommentsListCommand() *cobra.Command {
 					WriteError(err)
 					return ErrAlreadyReported
 				}
+				filtered = applyAwaiting(filtered)
 				if len(filtered) == 0 {
 					continue
 				}
@@ -187,6 +214,8 @@ func newCommentsListCommand() *cobra.Command {
 	c.Flags().BoolVar(&resolvedOnly, "resolved", false, "only threads marked resolved")
 	c.Flags().BoolVar(&detachedOnly, "detached", false, "only detached threads")
 	c.Flags().BoolVar(&openOnly, "open", false, "only unresolved, non-detached threads")
+	c.Flags().BoolVar(&awaitingAgent, "awaiting-agent", false, "only threads whose last message has role user (agent follow-up queue)")
+	c.Flags().BoolVar(&jsonOut, "json", false, "output JSON (no-op; output is always JSON)")
 	return c
 }
 
@@ -264,6 +293,9 @@ func newCommentsReattachCommand() *cobra.Command {
 	var threadID, anchor string
 	c := &cobra.Command{
 		Use:   "reattach <file.md>",
+		Aliases: []string{
+			"reattach-apply",
+		},
 		Short: "Move an existing thread to new anchor text (substring of the document)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -330,6 +362,58 @@ func newCommentsReattachCommand() *cobra.Command {
 	c.Flags().SortFlags = false
 	c.Flags().StringVar(&threadID, "thread", "", "existing thread id")
 	c.Flags().StringVar(&anchor, "anchor", "", "new anchor substring (must appear in the file)")
+	return c
+}
+
+func newCommentsAuditCommand() *cobra.Command {
+	var strict bool
+	c := &cobra.Command{
+		Use:   "audit <file.md>",
+		Short: "Warn if detached unresolved threads remain",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			abs, err := AbsMarkdown(args[0])
+			if err != nil {
+				WriteError(err)
+				return ErrAlreadyReported
+			}
+			threads, err := listThreadsForMarkdown(abs, false, false, false, true)
+			if err != nil {
+				WriteError(err)
+				return ErrAlreadyReported
+			}
+			detachedOpen := 0
+			for _, t := range threads {
+				if t.Detached && !t.Resolved {
+					detachedOpen++
+				}
+			}
+			if detachedOpen > 0 {
+				_, _ = fmt.Fprintf(os.Stderr, "WARNING: %d detached unresolved thread(s) found in %s\n", detachedOpen, abs)
+				_, _ = fmt.Fprintf(os.Stderr, "Run `agentmark comments list %s --detached` to inspect and reattach or reply.\n", abs)
+				if strict {
+					WriteError(fmt.Errorf("detached unresolved threads found"))
+					return ErrAlreadyReported
+				}
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			enc.SetEscapeHTML(false)
+			if err := enc.Encode(map[string]any{
+				"ok":           true,
+				"file":         abs,
+				"detachedOpen": detachedOpen,
+			}); err != nil {
+				WriteError(err)
+				return ErrAlreadyReported
+			}
+			return nil
+		},
+		SilenceUsage:  true,
+		SilenceErrors: true,
+	}
+	c.Flags().SortFlags = false
+	c.Flags().BoolVar(&strict, "strict", false, "exit non-zero if detached unresolved threads exist")
 	return c
 }
 
