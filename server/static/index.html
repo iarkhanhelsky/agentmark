@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AgentMark</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/marked@15.0.6/marked.min.js"></script>
+  <script defer src="/static/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+</head>
+<body x-data="shell" x-init="init()">
+  <div class="app-layout" :class="{ 'history-open': historyOpen }">
+    <!-- Mock file tree (visual only; single real file from server) -->
+    <aside class="file-tree" aria-label="Files">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">AM</span>
+        <span class="brand-name">AgentMark</span>
+      </div>
+
+      <div class="tree-section-label">DOCS</div>
+      <div class="tree-file-row">
+        <button type="button" class="tree-item active flex-grow" x-text="fileMeta.name || 'overview.md'"></button>
+        <span class="tree-badge" x-show="commentCount > 0" x-text="commentCount"></span>
+      </div>
+      <div class="tree-file-row">
+        <span class="tree-item tree-item-ghost">goals.md</span>
+      </div>
+      <div class="tree-file-row">
+        <span class="tree-item tree-item-ghost">usage.md</span>
+        <span class="tree-badge muted">1</span>
+      </div>
+
+      <div class="tree-section-label">DRAFTS</div>
+      <div class="tree-file-row">
+        <span class="tree-item tree-item-ghost">v1_archive.md</span>
+      </div>
+
+      <p class="tree-hint">Project tree is visual-only; only the highlighted file is live.</p>
+    </aside>
+
+    <section class="center">
+      <header class="doc-toolbar">
+        <div class="toolbar-left">
+          <span class="doc-title" x-text="fileMeta.name || 'overview.md'"></span>
+        </div>
+        <div class="toolbar-mid" role="tablist">
+          <button
+            type="button"
+            class="toolbar-seg-btn"
+            role="tab"
+            :aria-selected="viewMode === 'preview'"
+            :class="{ active: viewMode === 'preview' }"
+            @click="viewMode = 'preview'; render()"
+          >
+            <svg class="seg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            Preview
+          </button>
+          <button
+            type="button"
+            class="toolbar-seg-btn"
+            role="tab"
+            :aria-selected="viewMode === 'raw'"
+            :class="{ active: viewMode === 'raw' }"
+            @click="viewMode = 'raw'; render()"
+          >
+            <svg class="seg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M16 18l6-6-6-6M8 6l-6 6 6 6" />
+            </svg>
+            Markdown
+          </button>
+        </div>
+        <div class="toolbar-right">
+          <div class="toolbar-cluster" x-show="viewMode === 'preview'">
+            <div class="toolbar-comment-nav" title="Unresolved comments">
+              <button
+                type="button"
+                class="toolbar-icon-btn"
+                @click="prevThread()"
+                :disabled="!canNavigateComments"
+                aria-label="Previous comment"
+              >
+                <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
+              </button>
+              <button
+                type="button"
+                class="toolbar-icon-btn"
+                @click="nextThread()"
+                :disabled="!canNavigateComments"
+                aria-label="Next comment"
+              >
+                <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+              </button>
+            </div>
+            <div class="toolbar-resolved-toggle">
+              <span class="toolbar-resolved-label" id="resolved-label">Resolved</span>
+              <button
+                type="button"
+                class="toggle-switch"
+                role="switch"
+                :aria-checked="showResolved"
+                aria-labelledby="resolved-label"
+                @click="showResolved = !showResolved; render()"
+              >
+                <span class="toggle-switch-thumb" :class="{ on: showResolved }"></span>
+              </button>
+            </div>
+          </div>
+          <button type="button" class="btn btn-ghost" @click="copyReviewContext()">Copy context</button>
+          <button
+            type="button"
+            class="btn"
+            :class="{ 'btn-history-active': historyOpen }"
+            @click="historyOpen ? (historyOpen = false) : openHistory()"
+          >
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 7v5l3 2" />
+            </svg>
+            History
+          </button>
+        </div>
+      </header>
+
+      <div class="doc-scroll" id="doc-scroll" @scroll="onDocScroll()">
+        <div class="doc-review-row" id="doc-review-row">
+          <div class="preview-col">
+            <div
+              id="preview"
+              class="preview markdown-body prose-doc"
+              x-show="viewMode === 'preview'"
+              x-html="renderedHtml"
+              @mouseup="onPreviewMouseUp()"
+            ></div>
+            <pre class="preview raw-md" x-show="viewMode === 'raw'" x-text="markdown"></pre>
+          </div>
+
+          <aside class="gutter" aria-label="Comment anchors" x-show="viewMode === 'preview'">
+            <div class="gutter-track">
+              <template x-for="item in gutterLayout" :key="item.id">
+                <button
+                  type="button"
+                  class="gutter-pin"
+                  :class="{ active: activeThreadId === item.id, resolved: item.resolved }"
+                  :style="`top:${item.y}px`"
+                  :title="item.resolved ? 'Resolved thread' : 'Open thread'"
+                  @click="openThread(item.id, $event)"
+                >
+                  <i class="fa-regular fa-comment-dots" aria-hidden="true" x-show="!item.resolved"></i>
+                  <i class="fa-solid fa-check" aria-hidden="true" x-show="item.resolved"></i>
+                </button>
+              </template>
+            </div>
+          </aside>
+
+          <!-- Side rail: comment cards align here — never overlaps prose -->
+          <div class="bubble-rail" id="bubble-rail" x-show="viewMode === 'preview'" aria-live="polite">
+            <div
+              class="selection-popover"
+              x-show="toolbar.show"
+              x-cloak
+              :style="`top:${toolbar.top}px;left:${toolbar.left}px`"
+            >
+              <button type="button" class="selection-popover-btn" @click="addCommentFromSelection()">
+                <i class="fa-regular fa-comment-dots" aria-hidden="true"></i>
+                Add Comment
+              </button>
+            </div>
+
+            <div
+              class="comment-bubble"
+              x-show="activeThreadId && bubble.open && activeThread"
+              x-cloak
+              @click.stop
+              :style="`top:${bubble.top}px`"
+            >
+              <div class="bubble-inner">
+                <div class="bubble-card-head">
+                  <span class="bubble-author">
+                    <i class="fa-solid fa-user" aria-hidden="true"></i>
+                    <span x-text="bubbleAuthorLabel(activeThread)"></span>
+                  </span>
+                  <div class="bubble-head-actions">
+                    <button
+                      type="button"
+                      class="bubble-icon-btn"
+                      @click="toggleResolve(activeThreadId, !(activeThread && activeThread.resolved))"
+                      :title="activeThread && activeThread.resolved ? 'Unresolve' : 'Resolve'"
+                    >
+                      <i class="fa-solid fa-check" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" class="bubble-icon-btn" @click="closeThread()" title="Close">
+                      <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                    </button>
+                  </div>
+                </div>
+                <div class="bubble-card-body">
+                  <p
+                    class="bubble-anchor-line"
+                    x-show="activeThread && !(activeThread.thread || []).length"
+                    x-text="activeThread && activeThread.anchorText"
+                  ></p>
+                  <template x-for="(m, idx) in (activeThread && activeThread.thread) || []" :key="idx">
+                    <p class="bubble-msg" x-text="m.body"></p>
+                  </template>
+                </div>
+                <div class="bubble-card-footer">
+                  <input
+                    type="text"
+                    class="bubble-reply-input"
+                    placeholder="Reply…"
+                    x-model="drafts[activeThreadId]"
+                    @keydown.enter.prevent="sendReply(activeThreadId)"
+                  />
+                  <button type="button" class="bubble-send-btn" @click="sendReply(activeThreadId)" title="Send">
+                    <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- History: fixed panel, document compresses via .history-open padding -->
+    <aside class="history-panel" id="history-panel" aria-label="Version history">
+      <div class="history-head">
+        <span class="history-title">History</span>
+        <button type="button" class="btn btn-ghost history-close" @click="historyOpen = false">×</button>
+      </div>
+
+      <div class="history-body">
+        <div class="timeline-label">Versions</div>
+        <div class="timeline" role="list">
+          <template x-for="(snap, idx) in snapshots" :key="snap.id">
+            <button
+              type="button"
+              class="timeline-row"
+              :class="{ active: history.focusIndex === idx }"
+              @click="selectSnapshotPair(idx)"
+            >
+              <span class="timeline-dot" :class="{ current: idx === 0 }"></span>
+              <div class="timeline-meta">
+                <span class="timeline-id" x-text="formatSnapLabel(snap, idx)"></span>
+                <span class="timeline-sub" x-text="snap.lines + ' lines'"></span>
+              </div>
+            </button>
+          </template>
+        </div>
+
+        <div class="diff-section" x-show="diffLines.length">
+          <div class="diff-head">
+            <span>Diff</span>
+            <span class="diff-range" x-text="diffRangeLabel"></span>
+          </div>
+          <div class="diff-inline">
+            <template x-for="(line, li) in diffLines" :key="li">
+              <div class="diff-line" :class="line.type">
+                <span class="diff-sign" x-text="line.type === 'added' ? '+' : line.type === 'removed' ? '−' : ' '"></span>
+                <code x-text="line.text"></code>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <div class="apply-section" x-show="history.hunks.length">
+          <div class="apply-label">Apply hunks to current file</div>
+          <template x-for="h in history.hunks" :key="h.id">
+            <label class="hunk" :class="h.kind">
+              <span class="hunk-head">
+                <input type="checkbox" x-model="history.accept[h.id]" />
+                <span x-text="h.kind + ' @ old L' + h.oldLine"></span>
+              </span>
+              <pre class="old" x-show="h.old && h.old.length" x-text="h.old.join('\n')"></pre>
+              <pre class="new" x-show="h.new && h.new.length" x-text="h.new.join('\n')"></pre>
+            </label>
+          </template>
+          <button type="button" class="btn primary apply-btn" @click="applySelectedHunks()">Apply selected</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+</body>
+</html>
