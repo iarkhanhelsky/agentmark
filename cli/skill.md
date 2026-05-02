@@ -52,6 +52,15 @@ agentmark comments list .
 agentmark comments list ./docs --open
 ```
 
+### Message body format (`--role agent`)
+
+When you post with `--role agent` (the default), the first line must identify **where the message came from** so threads stay attributable. Use a single short token:
+
+- **From the main chat/session** — the tool/CLI name, e.g. `Cursor`, `Claude`, `Codex`.
+- **From a named subagent task** — the stable subagent identifier prefixed with `@`, e.g. `@explore`, `@code-reviewer`.
+
+The CLI enforces a minimal shape only: the first line must be non-blank and at most 40 characters; the exact token is up to you. Put a blank line after the intro before substantive text when it helps readability. `--role user` is not validated.
+
 **New thread** (substring `anchor` must appear in the file for a stable anchor):
 
 ```bash

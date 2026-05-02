@@ -15,6 +15,33 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const agentIntroMaxLen = 40
+
+const agentIntroHelp = `with --role agent, the first line of --body must identify the source of the message.
+Main chat/session: the tool/CLI name (e.g. "Cursor", "Claude", "Codex").
+Subagent task: the stable subagent identifier prefixed with @ (e.g. "@explore").
+Limit: %d chars on a single line.`
+
+// validateAgentBody enforces a minimal-shape rule for --role agent:
+// the first line of the body must be a non-blank intro line of at most
+// agentIntroMaxLen characters. The exact token is not constrained —
+// agents just need to identify their source with a stable short name.
+// No-op for other roles.
+func validateAgentBody(role, body string) error {
+	if role != "agent" {
+		return nil
+	}
+	first, _, _ := strings.Cut(body, "\n")
+	trimmed := strings.TrimSpace(first)
+	if trimmed == "" {
+		return fmt.Errorf(agentIntroHelp+"\nGot: empty first line.", agentIntroMaxLen)
+	}
+	if n := len([]rune(trimmed)); n > agentIntroMaxLen {
+		return fmt.Errorf(agentIntroHelp+"\nGot: %d chars.", agentIntroMaxLen, n)
+	}
+	return nil
+}
+
 func newCommentsCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "comments",
@@ -22,11 +49,11 @@ func newCommentsCommand() *cobra.Command {
 		Long: `Operate on .<filename>.comments.json next to a markdown file (or list all
 markdown under a directory). Output is JSON on stdout; errors are JSON on stderr.
 
-For role agent (default on add/reply), start the message body with a short intro line:
-  Claude, Cursor
-or, when posting from a named subagent task:
-  Claude, Cursor, @SubagentName
-Then a blank line before the rest of the message.`,
+For --role agent (default on add/reply), the first line of --body must identify
+the source of the message:
+  - Main chat/session: the tool/CLI name (e.g. "Cursor", "Claude", "Codex").
+  - Subagent task: the stable subagent identifier prefixed with @ (e.g. "@explore").
+Put a blank line after the intro before substantive text when it helps readability.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
@@ -174,6 +201,10 @@ func newCommentsAddCommand() *cobra.Command {
 				WriteError(fmt.Errorf("--anchor and --body are required"))
 				return ErrAlreadyReported
 			}
+			if err := validateAgentBody(role, body); err != nil {
+				WriteError(err)
+				return ErrAlreadyReported
+			}
 			abs, err := AbsMarkdown(args[0])
 			if err != nil {
 				WriteError(err)
@@ -222,8 +253,8 @@ func newCommentsAddCommand() *cobra.Command {
 	}
 	c.Flags().SortFlags = false
 	c.Flags().StringVar(&anchor, "anchor", "", "anchor text (substring of document)")
-	c.Flags().StringVar(&body, "body", "", "message body; for --role agent, first line: \"Claude, Cursor\" or \"Claude, Cursor, @SubagentName\"")
-	c.Flags().StringVar(&role, "role", "agent", "message role: user | agent (agent: use intro line in --body as in comments --help)")
+	c.Flags().StringVar(&body, "body", "", "message body; for --role agent, first line is the source token (e.g. \"Cursor\" or \"@explore\")")
+	c.Flags().StringVar(&role, "role", "agent", "message role: user | agent (agent: see comments --help for first-line convention)")
 	return c
 }
 
@@ -311,6 +342,10 @@ func newCommentsReplyCommand() *cobra.Command {
 				WriteError(fmt.Errorf("--thread and --body are required"))
 				return ErrAlreadyReported
 			}
+			if err := validateAgentBody(role, body); err != nil {
+				WriteError(err)
+				return ErrAlreadyReported
+			}
 			abs, err := AbsMarkdown(args[0])
 			if err != nil {
 				WriteError(err)
@@ -361,8 +396,8 @@ func newCommentsReplyCommand() *cobra.Command {
 	}
 	c.Flags().SortFlags = false
 	c.Flags().StringVar(&threadID, "thread", "", "thread id")
-	c.Flags().StringVar(&body, "body", "", "reply body; for --role agent, first line: \"Claude, Cursor\" or \"Claude, Cursor, @SubagentName\"")
-	c.Flags().StringVar(&role, "role", "agent", "message role: user | agent (agent: use intro line in --body as in comments --help)")
+	c.Flags().StringVar(&body, "body", "", "reply body; for --role agent, first line is the source token (e.g. \"Cursor\" or \"@explore\")")
+	c.Flags().StringVar(&role, "role", "agent", "message role: user | agent (agent: see comments --help for first-line convention)")
 	return c
 }
 
