@@ -30,8 +30,9 @@ var upgrader = websocket.Upgrader{
 
 // Config for the HTTP server.
 type Config struct {
-	FilePath string // absolute path to markdown file
-	Port     string // e.g. "4173"
+	FilePath    string // absolute path to markdown file
+	ProjectRoot string // absolute project directory (parent of initial file); set in Start
+	Port        string // e.g. "4173"
 }
 
 // App holds runtime state.
@@ -53,16 +54,39 @@ func Start(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(abs); err != nil {
+	st, err := os.Stat(abs)
+	if err != nil {
 		if os.IsNotExist(err) {
 			if err := os.WriteFile(abs, []byte("# Document\n\n"), 0o644); err != nil {
+				return err
+			}
+			st, err = os.Stat(abs)
+			if err != nil {
 				return err
 			}
 		} else {
 			return err
 		}
 	}
-	cfg.FilePath = abs
+
+	if st.IsDir() {
+		rootDir := filepath.Clean(abs)
+		initial, err := PickInitialMarkdown(rootDir)
+		if err != nil {
+			return err
+		}
+		abs = filepath.Clean(initial)
+		cfg.FilePath = abs
+		cfg.ProjectRoot = rootDir
+	} else {
+		cfg.FilePath = abs
+		rootDir := filepath.Dir(abs)
+		rootDir, err = filepath.Abs(rootDir)
+		if err != nil {
+			return err
+		}
+		cfg.ProjectRoot = rootDir
+	}
 
 	raw, err := os.ReadFile(abs)
 	if err != nil {
@@ -112,9 +136,10 @@ func Start(ctx context.Context, cfg Config) error {
 
 	stopWatch, err := WatchFile(abs, 150*time.Millisecond, func(newContent string) {
 		app.mu.Lock()
+		activePath := app.cfg.FilePath
 		app.content = newContent
 		app.threads = ReanchorThreads(newContent, app.threads)
-		_ = SaveThreads(abs, app.threads)
+		_ = SaveThreads(activePath, app.threads)
 		app.mu.Unlock()
 		app.broadcast(WSEvent{Type: "file_update", Content: newContent})
 		app.broadcast(WSEvent{Type: "threads_update", Threads: app.snapshotThreads()})
@@ -149,9 +174,12 @@ func Start(ctx context.Context, cfg Config) error {
 	r.Get("/ws", app.handleWS)
 
 	r.Get("/api/file-meta", app.handleFileMeta)
+	r.Get("/api/project/tree", app.handleProjectTree)
+	r.Post("/api/file/select", app.handleFileSelect)
 	r.Post("/api/threads/upsert", app.handleUpsert)
 	r.Post("/api/threads/reply", app.handleReply)
 	r.Post("/api/threads/resolve", app.handleResolve)
+	r.Post("/api/threads/delete", app.handleDeleteThread)
 	r.Post("/api/threads/detached", app.handleDetached)
 	r.Get("/api/snapshots", app.handleSnapshotsList)
 	r.Get("/api/snapshots/diff", app.handleSnapshotsDiff)
@@ -193,7 +221,16 @@ func (a *App) handleWS(w http.ResponseWriter, r *http.Request) {
 	a.wsMu.Unlock()
 
 	a.mu.Lock()
+	path := a.cfg.FilePath
+	root := a.cfg.ProjectRoot
+	relSlash := ""
+	if root != "" && path != "" {
+		if rel, err := filepath.Rel(root, path); err == nil {
+			relSlash = filepath.ToSlash(rel)
+		}
+	}
 	init := []WSEvent{
+		{Type: "active_file", Name: filepath.Base(path), Path: path, RelPath: relSlash},
 		{Type: "file_update", Content: a.content},
 		{Type: "threads_update", Threads: a.threads},
 	}
@@ -317,11 +354,54 @@ func (a *App) handleReply(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleFileMeta(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	path := a.cfg.FilePath
+	root := a.cfg.ProjectRoot
 	a.mu.Unlock()
+	relSlash := ""
+	if root != "" && path != "" {
+		if rel, err := filepath.Rel(root, path); err == nil {
+			relSlash = filepath.ToSlash(rel)
+		}
+	}
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"name": filepath.Base(path),
-		"path": path,
+		"name":    filepath.Base(path),
+		"path":    path,
+		"relPath": relSlash,
 	})
+}
+
+func (a *App) handleDeleteThread(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	if req.ID == "" {
+		http.Error(w, "id required", 400)
+		return
+	}
+	a.mu.Lock()
+	found := false
+	next := make([]CommentThread, 0, len(a.threads))
+	for _, t := range a.threads {
+		if t.ID == req.ID {
+			found = true
+			continue
+		}
+		next = append(next, t)
+	}
+	if !found {
+		a.mu.Unlock()
+		http.Error(w, "thread not found", 404)
+		return
+	}
+	a.threads = next
+	_ = SaveThreads(a.cfg.FilePath, a.threads)
+	t := a.threads
+	a.mu.Unlock()
+	a.broadcast(WSEvent{Type: "threads_update", Threads: t})
+	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
 func (a *App) handleResolve(w http.ResponseWriter, r *http.Request) {

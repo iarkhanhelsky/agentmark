@@ -34,6 +34,22 @@ func LoadThreads(filePath string) ([]CommentThread, error) {
 	return f.Threads, nil
 }
 
+// OpenUnresolvedThreadCount returns the number of threads that are not resolved
+// and not detached for the given markdown file (reads sidecar).
+func OpenUnresolvedThreadCount(filePath string) (int, error) {
+	threads, err := LoadThreads(filePath)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, t := range threads {
+		if !t.Resolved && !t.Detached {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // SaveThreads writes threads to the sidecar.
 func SaveThreads(filePath string, threads []CommentThread) error {
 	p := CommentsPathFor(filePath)

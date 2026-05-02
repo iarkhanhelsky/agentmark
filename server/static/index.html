@@ -15,32 +15,29 @@
 </head>
 <body x-data="shell" x-init="init()">
   <div class="app-layout" :class="{ 'history-open': historyOpen }">
-    <!-- Mock file tree (visual only; single real file from server) -->
     <aside class="file-tree" aria-label="Files">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">AM</span>
         <span class="brand-name">AgentMark</span>
       </div>
 
-      <div class="tree-section-label">DOCS</div>
-      <div class="tree-file-row">
-        <button type="button" class="tree-item active flex-grow" x-text="fileMeta.name || 'overview.md'"></button>
-        <span class="tree-badge" x-show="commentCount > 0" x-text="commentCount"></span>
-      </div>
-      <div class="tree-file-row">
-        <span class="tree-item tree-item-ghost">goals.md</span>
-      </div>
-      <div class="tree-file-row">
-        <span class="tree-item tree-item-ghost">usage.md</span>
-        <span class="tree-badge muted">1</span>
-      </div>
-
-      <div class="tree-section-label">DRAFTS</div>
-      <div class="tree-file-row">
-        <span class="tree-item tree-item-ghost">v1_archive.md</span>
-      </div>
-
-      <p class="tree-hint">Project tree is visual-only; only the highlighted file is live.</p>
+      <template x-for="section in projectTree.sections" :key="section.label || '__root__'">
+        <div class="tree-section">
+          <div class="tree-section-label" x-show="section.label" x-text="section.label"></div>
+          <template x-for="f in section.files" :key="f.relPath">
+            <div class="tree-file-row">
+              <button
+                type="button"
+                class="tree-item flex-grow"
+                :class="{ active: f.relPath === fileMeta.relPath }"
+                x-text="f.name"
+                @click="selectFile(f.relPath)"
+              ></button>
+              <span class="tree-badge" x-show="f.openCommentCount > 0" x-text="f.openCommentCount"></span>
+            </div>
+          </template>
+        </div>
+      </template>
     </aside>
 
     <section class="center">
@@ -163,18 +160,6 @@
           <!-- Side rail: comment cards align here — never overlaps prose -->
           <div class="bubble-rail" id="bubble-rail" x-show="viewMode === 'preview'" aria-live="polite">
             <div
-              class="selection-popover"
-              x-show="toolbar.show"
-              x-cloak
-              :style="`top:${toolbar.top}px;left:${toolbar.left}px`"
-            >
-              <button type="button" class="selection-popover-btn" @click="addCommentFromSelection()">
-                <i class="fa-regular fa-comment-dots" aria-hidden="true"></i>
-                Add Comment
-              </button>
-            </div>
-
-            <div
               class="comment-bubble"
               x-show="activeThreadId && bubble.open && activeThread"
               x-cloak
@@ -188,6 +173,15 @@
                     <span x-text="bubbleAuthorLabel(activeThread)"></span>
                   </span>
                   <div class="bubble-head-actions">
+                    <button
+                      type="button"
+                      class="bubble-icon-btn bubble-icon-btn-danger"
+                      @click="deleteThread(activeThreadId)"
+                      title="Delete thread"
+                      aria-label="Delete thread"
+                    >
+                      <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+                    </button>
                     <button
                       type="button"
                       class="bubble-icon-btn"
@@ -225,6 +219,18 @@
                 </div>
               </div>
             </div>
+          </div>
+
+          <div
+            class="selection-popover"
+            x-show="viewMode === 'preview' && toolbar.show"
+            x-cloak
+            :style="`top:${toolbar.top}px;left:${toolbar.left}px`"
+          >
+            <button type="button" class="selection-popover-btn" @click="addCommentFromSelection()">
+              <i class="fa-regular fa-comment-dots" aria-hidden="true"></i>
+              Add Comment
+            </button>
           </div>
         </div>
       </div>

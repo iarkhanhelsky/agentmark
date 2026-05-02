@@ -5,7 +5,9 @@ function shell() {
     markdown: "",
     threads: [],
     renderedHtml: "",
-    fileMeta: { name: "", path: "" },
+    fileMeta: { name: "", path: "", relPath: "" },
+    projectTree: { root: "", sections: [] },
+    _treeRefreshTimer: null,
     viewMode: "preview",
     showResolved: false,
     historyOpen: false,
@@ -53,6 +55,7 @@ function shell() {
 
     init() {
       this.fetchFileMeta();
+      this.fetchProjectTree();
       this.connectWS();
     },
 
@@ -67,16 +70,70 @@ function shell() {
       }
     },
 
+    async fetchProjectTree() {
+      try {
+        const res = await fetch("/api/project/tree");
+        if (res.ok) {
+          this.projectTree = await res.json();
+        }
+      } catch (_) {
+        /* ignore */
+      }
+    },
+
+    scheduleProjectTreeRefresh() {
+      if (this._treeRefreshTimer) clearTimeout(this._treeRefreshTimer);
+      this._treeRefreshTimer = setTimeout(() => {
+        this._treeRefreshTimer = null;
+        this.fetchProjectTree();
+      }, 400);
+    },
+
+    resetHistoryForFileSwitch() {
+      this.historyOpen = false;
+      this.snapshots = [];
+      this.diffLines = [];
+      this.history = {
+        left: "",
+        right: "",
+        focusIndex: 0,
+        hunks: [],
+        accept: {},
+      };
+      this.closeThread();
+    },
+
+    async selectFile(relPath) {
+      if (relPath === this.fileMeta.relPath) return;
+      const res = await fetch("/api/file/select", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path: relPath }),
+      });
+      if (!res.ok) {
+        alert(await res.text());
+      }
+    },
+
     connectWS() {
       const proto = window.location.protocol === "https:" ? "wss" : "ws";
       this.ws = new WebSocket(`${proto}://${window.location.host}/ws`);
       this.ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data);
-        if (msg.type === "file_update") {
+        if (msg.type === "active_file") {
+          this.fileMeta = {
+            name: msg.name || "",
+            path: msg.path || "",
+            relPath: msg.relPath || "",
+          };
+          this.resetHistoryForFileSwitch();
+          this.fetchProjectTree();
+        } else if (msg.type === "file_update") {
           this.markdown = msg.content;
           this.render();
         } else if (msg.type === "threads_update") {
           this.threads = msg.threads || [];
+          this.scheduleProjectTreeRefresh();
           if (this._pendingOpenId) {
             const pid = this._pendingOpenId;
             this._pendingOpenId = null;
@@ -204,9 +261,49 @@ function shell() {
       }
     },
 
-    closeThread() {
+    threadHasMessages(thread) {
+      if (!thread) return false;
+      return (thread.thread || []).some((m) => (m.body || "").trim() !== "");
+    },
+
+    async deleteThread(threadId) {
+      if (!threadId) return;
+      const res = await fetch("/api/threads/delete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: threadId }),
+      });
+      if (!res.ok) {
+        alert(await res.text());
+        return;
+      }
+      if (this.activeThreadId === threadId) {
+        this.activeThreadId = null;
+        this.bubble.open = false;
+      }
+      delete this.drafts[threadId];
+    },
+
+    async closeThread() {
+      const id = this.activeThreadId;
+      const t = id ? this.threads.find((x) => x.id === id) : null;
+      const hasMsgs = this.threadHasMessages(t);
+      const draft = id ? (this.drafts[id] || "").trim() : "";
+
       this.activeThreadId = null;
       this.bubble.open = false;
+
+      if (id && t && !hasMsgs && !draft) {
+        try {
+          await fetch("/api/threads/delete", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ id }),
+          });
+        } catch (_) {
+          /* ignore */
+        }
+      }
     },
 
     onPreviewMouseUp() {
@@ -230,10 +327,18 @@ function shell() {
       if (!row) return;
       const rect = range.getBoundingClientRect();
       const rr = row.getBoundingClientRect();
+      let left = rect.left - rr.left + rect.width / 2;
+      /* .selection-popover uses translateX(-50%); keep chip inside row */
+      const halfChip = 80;
+      if (rr.width <= halfChip * 2) {
+        left = rr.width / 2;
+      } else {
+        left = Math.max(halfChip, Math.min(rr.width - halfChip, left));
+      }
       this.toolbar = {
         show: true,
         top: rect.top - rr.top - 42,
-        left: rect.left - rr.left + rect.width / 2,
+        left,
       };
       const full = this.markdown;
       const ctx = contextAroundSelection(full, text);
@@ -242,26 +347,32 @@ function shell() {
 
     async addCommentFromSelection() {
       const id = crypto.randomUUID();
-      const hint = this.markdown.indexOf(this.sel.text);
-      const body = {
-        id,
-        anchorText: this.sel.text,
-        anchor:
-          hint >= 0
-            ? {
-                startOffset: hint,
-                endOffset: hint + this.sel.text.length,
-                prefix: this.sel.prefix,
-                suffix: this.sel.suffix,
-              }
-            : undefined,
-      };
+      const span = findMarkdownSpan(this.markdown, this.sel.text);
+      let anchorText = this.sel.text;
+      let anchor = undefined;
+      if (span) {
+        anchorText = this.markdown.slice(span.start, span.end);
+        const p0 = Math.max(0, span.start - 40);
+        const s1 = Math.min(this.markdown.length, span.end + 40);
+        anchor = {
+          startOffset: span.start,
+          endOffset: span.end,
+          prefix: this.markdown.slice(p0, span.start),
+          suffix: this.markdown.slice(span.end, s1),
+        };
+      }
+      const body = { id, anchorText, anchor };
       this._pendingOpenId = id;
-      await fetch("/api/threads/upsert", {
+      const res = await fetch("/api/threads/upsert", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
+      if (!res.ok) {
+        this._pendingOpenId = null;
+        alert(await res.text());
+        return;
+      }
       this.toolbar.show = false;
       window.getSelection()?.removeAllRanges();
     },
@@ -436,20 +547,156 @@ function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function stripBasicMarkdownForMatch(s) {
+  if (!s) return "";
+  return s
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1");
+}
+
+/** Lets <strong>, etc. appear between words when matching rendered HTML. */
+function wordsBridgePatternSource(plainChunk) {
+  const words = plainChunk.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return null;
+  return words.map(escapeRegExp).join("[\\s\\S]*?");
+}
+
+/**
+ * When markdown anchor text is not a literal substring of HTML (e.g. **bold** or blank lines between paragraphs).
+ */
+function anchorHtmlPattern(needleMd) {
+  const trimmed = (needleMd || "").trim();
+  if (!trimmed) return null;
+  const blocks = trimmed
+    .split(/\n\s*\n/)
+    .map((p) => stripBasicMarkdownForMatch(p.trim()))
+    .filter(Boolean);
+  if (blocks.length >= 2) {
+    const pieces = blocks.map(wordsBridgePatternSource).filter(Boolean);
+    if (pieces.length >= 2) {
+      return new RegExp(`(${pieces.join("[\\s\\S]*?")})`, "");
+    }
+  }
+  const one = blocks.length === 1 ? blocks[0] : stripBasicMarkdownForMatch(trimmed);
+  const src = wordsBridgePatternSource(one);
+  if (src) return new RegExp(`(${src})`, "");
+  return null;
+}
+
 function highlightAnchors(html, threads, showResolved) {
   for (const t of threads) {
     if (t.detached) continue;
     if (t.resolved && !showResolved) continue;
     const needle = (t.anchorText || "").trim();
     if (!needle) continue;
-    const re = new RegExp(`(${escapeRegExp(needle)})`, "");
     const cls = t.resolved ? "anchor-mark resolved" : "anchor-mark";
     const wrapped = `<mark data-thread-id="${t.id}" class="${cls}">$1</mark>`;
     if (html.includes(needle)) {
+      const re = new RegExp(`(${escapeRegExp(needle)})`, "");
       html = html.replace(re, wrapped);
+    } else {
+      const alt = anchorHtmlPattern(needle);
+      if (alt && alt.test(html)) {
+        html = html.replace(alt, wrapped);
+      }
     }
   }
   return html;
+}
+
+/** DOM selections often use a single \\n between blocks; markdown uses blank lines (\\n\\n). */
+function expandCrossBlockNewlines(s) {
+  let cur = s;
+  for (;;) {
+    const next = cur.replace(/([^\n])\n([^\n])/g, "$1\n\n$2");
+    if (next === cur) break;
+    cur = next;
+  }
+  return cur;
+}
+
+/**
+ * Maps the preview’s visible text (what getSelection().toString() returns) onto markdown byte offsets.
+ * Skips **bold** and `code` delimiters so "review" matches **review** in the source.
+ */
+function mdVisiblePlainWithMap(markdown) {
+  const plainChars = [];
+  const mdIdx = [];
+  const n = markdown.length;
+  let i = 0;
+  while (i < n) {
+    if (markdown[i] === "\r") {
+      i++;
+      continue;
+    }
+    if (markdown.startsWith("**", i)) {
+      i += 2;
+      while (i < n && !markdown.startsWith("**", i)) {
+        if (markdown[i] === "\r") {
+          i++;
+          continue;
+        }
+        plainChars.push(markdown[i]);
+        mdIdx.push(i);
+        i++;
+      }
+      if (markdown.startsWith("**", i)) i += 2;
+      continue;
+    }
+    if (markdown[i] === "`") {
+      i++;
+      while (i < n && markdown[i] !== "`") {
+        if (markdown[i] === "\r") {
+          i++;
+          continue;
+        }
+        plainChars.push(markdown[i]);
+        mdIdx.push(i);
+        i++;
+      }
+      if (markdown[i] === "`") i++;
+      continue;
+    }
+    plainChars.push(markdown[i]);
+    mdIdx.push(i);
+    i++;
+  }
+  return { plain: plainChars.join(""), mdIdx };
+}
+
+function findMarkdownSpan(markdown, selectedRaw) {
+  if (!markdown || selectedRaw == null || selectedRaw === "") return null;
+  const sel = String(selectedRaw).replace(/\r\n/g, "\n").trim();
+  if (!sel) return null;
+
+  const { plain, mdIdx } = mdVisiblePlainWithMap(markdown);
+  const tryInPlain = (candidate) => {
+    if (!candidate) return null;
+    const p = plain.indexOf(candidate);
+    if (p < 0) return null;
+    const endPlain = p + candidate.length;
+    if (endPlain > mdIdx.length || endPlain <= 0) return null;
+    return { start: mdIdx[p], end: mdIdx[endPlain - 1] + 1 };
+  };
+
+  let span = tryInPlain(sel);
+  if (span) return span;
+  const expanded = expandCrossBlockNewlines(sel);
+  if (expanded !== sel) {
+    span = tryInPlain(expanded);
+    if (span) return span;
+  }
+
+  /* Last resort: raw markdown substring (plain selections that match source literally). */
+  const rawTry = (candidate) => {
+    const start = markdown.indexOf(candidate);
+    if (start < 0) return null;
+    return { start, end: start + candidate.length };
+  };
+  span = rawTry(sel);
+  if (span) return span;
+  if (expanded !== sel) return rawTry(expanded);
+  return null;
 }
 
 function contextAroundSelection(full, selected) {

@@ -61,7 +61,7 @@ body {
   padding-right: 380px;
 }
 
-/* —— Sidebar (mock file tree) —— */
+/* —— Sidebar (project file tree) —— */
 .file-tree {
   border-right: 1px solid var(--border);
   background: var(--panel);
@@ -98,10 +98,9 @@ body {
 }
 
 .tree-section-label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.02em;
   color: var(--text-muted);
   margin: 14px 0 8px;
 }
@@ -129,7 +128,7 @@ body {
   color: var(--text-secondary);
   font-size: 13px;
   font-family: inherit;
-  cursor: default;
+  cursor: pointer;
 }
 
 .tree-item.flex-grow {
@@ -140,12 +139,6 @@ body {
   background: var(--row-active);
   color: var(--accent);
   font-weight: 600;
-}
-
-.tree-item-ghost {
-  opacity: 0.85;
-  cursor: default;
-  pointer-events: none;
 }
 
 .tree-badge {
@@ -165,13 +158,6 @@ body {
 .tree-badge.muted {
   background: #e2e2e8;
   color: var(--text-muted);
-}
-
-.tree-hint {
-  margin-top: 20px;
-  font-size: 11px;
-  color: var(--text-muted);
-  line-height: 1.45;
 }
 
 /* —— Center —— */
@@ -678,6 +664,11 @@ body {
 .bubble-icon-btn:hover {
   background: #e2e8f0;
   color: #475569;
+}
+
+.bubble-icon-btn-danger:hover {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .bubble-icon-btn i {
