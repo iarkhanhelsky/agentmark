@@ -40,16 +40,16 @@ type Config struct {
 
 // App holds runtime state.
 type App struct {
-	cfg       Config
-	content   string
-	threads   []CommentThread
-	snapshots *SnapshotStore
-	clients   map[*websocket.Conn]struct{}
-	mu        sync.Mutex
-	wsMu      sync.Mutex
-	stopWatch func()
+	cfg               Config
+	content           string
+	threads           []CommentThread
+	snapshots         *SnapshotStore
+	clients           map[*websocket.Conn]struct{}
+	mu                sync.Mutex
+	wsMu              sync.Mutex
+	stopWatch         func()
 	stopCommentsWatch func()
-	broadcast func(WSEvent)
+	broadcast         func(WSEvent)
 }
 
 func (a *App) writeWSMessage(c *websocket.Conn, b []byte) error {
