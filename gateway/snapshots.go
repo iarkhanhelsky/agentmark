@@ -1,4 +1,4 @@
-package server
+package gateway
 
 import (
 	"crypto/sha1"
@@ -325,7 +325,7 @@ func (s *SnapshotStore) Diff(leftID, rightID string) ([]DiffHunk, error) {
 	return LineDiff(left, right), nil
 }
 
-// DiffAgainstContent returns hunks from snapshot leftID to newText (e.g. working copy).
+// DiffAgainstContent returns hunks from snapshot leftId to newText (e.g. working copy).
 func (s *SnapshotStore) DiffAgainstContent(leftID string, newText string) ([]DiffHunk, error) {
 	left, err := s.Read(leftID)
 	if err != nil {

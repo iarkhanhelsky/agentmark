@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"agentmark/cli/internal/cmdcore"
-	"agentmark/server"
+	"agentmark/gateway"
 
 	"github.com/spf13/cobra"
 )
@@ -58,7 +58,7 @@ func runResolve(pathArg, threadID string, resolved bool) error {
 		return cmdcore.ErrAlreadyReported
 	}
 	markdown := string(raw)
-	threads, err := server.LoadThreads(abs)
+	threads, err := gateway.LoadThreads(abs)
 	if err != nil {
 		cmdcore.WriteError(err)
 		return cmdcore.ErrAlreadyReported
@@ -75,9 +75,9 @@ func runResolve(pathArg, threadID string, resolved bool) error {
 		cmdcore.WriteError(fmt.Errorf("thread not found"))
 		return cmdcore.ErrAlreadyReported
 	}
-	snap, _ := server.NewSnapshotStore(abs)
-	threads = server.ReanchorThreadsWithStore(markdown, threads, snap)
-	if err := server.SaveThreads(abs, threads); err != nil {
+	snap, _ := gateway.NewSnapshotStore(abs)
+	threads = gateway.ReanchorThreadsWithStore(markdown, threads, snap)
+	if err := gateway.SaveThreads(abs, threads); err != nil {
 		cmdcore.WriteError(err)
 		return cmdcore.ErrAlreadyReported
 	}

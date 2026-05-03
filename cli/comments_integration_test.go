@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"agentmark/server"
+	"agentmark/gateway"
 )
 
 func TestIntegrationCommentsLifecycle(t *testing.T) {
@@ -33,7 +33,7 @@ func TestIntegrationCommentsLifecycle(t *testing.T) {
 	if threadID == "" {
 		t.Fatalf("missing threadId: %s", add.stdout)
 	}
-	if _, err := os.Stat(server.CommentsPathFor(md)); err != nil {
+	if _, err := os.Stat(gateway.CommentsPathFor(md)); err != nil {
 		t.Fatalf("sidecar not created: %v", err)
 	}
 
@@ -255,7 +255,7 @@ func TestIntegrationCommentsAddDoesNotCreateDetachedSidecarEntry(t *testing.T) {
 		t.Fatalf("stderr %q missing anchor-not-found message", got.stderr)
 	}
 
-	sidecarPath := server.CommentsPathFor(md)
+	sidecarPath := gateway.CommentsPathFor(md)
 	if _, err := os.Stat(sidecarPath); err == nil {
 		t.Fatalf("expected no sidecar created on failed add, found %s", sidecarPath)
 	} else if !os.IsNotExist(err) {

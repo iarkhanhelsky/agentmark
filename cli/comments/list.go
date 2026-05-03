@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"agentmark/cli/internal/cmdcore"
-	"agentmark/server"
+	"agentmark/gateway"
 
 	"github.com/spf13/cobra"
 )
@@ -56,7 +56,7 @@ func runList(pathArg string, f listFlags) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	enc.SetEscapeHTML(false)
-	applyAwaiting := func(threads []server.CommentThread) []server.CommentThread {
+	applyAwaiting := func(threads []gateway.CommentThread) []gateway.CommentThread {
 		if !f.awaitingAgent {
 			return threads
 		}

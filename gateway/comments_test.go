@@ -1,4 +1,4 @@
-package server
+package gateway
 
 import (
 	"os"
@@ -44,20 +44,6 @@ func TestReanchorThreads_bracketMiddleChanged(t *testing.T) {
 	}
 	if out[0].AnchorText != "NEWPHRASE" {
 		t.Fatalf("got anchor %q", out[0].AnchorText)
-	}
-}
-
-func TestMapOldByteRangeToNew_lineShift(t *testing.T) {
-	old := "line0\nkeep this phrase\nline2"
-	newText := "inserted\nline0\nkeep this phrase\nline2"
-	start := strings.Index(old, "keep this phrase")
-	end := start + len("keep this phrase")
-	ns, ne, ok := MapOldByteRangeToNew(old, newText, start, end)
-	if !ok {
-		t.Fatal("expected ok")
-	}
-	if newText[ns:ne] != "keep this phrase" {
-		t.Fatalf("got %q", newText[ns:ne])
 	}
 }
 

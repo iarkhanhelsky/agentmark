@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"agentmark/server"
+	"agentmark/gateway"
 
 	"github.com/spf13/cobra"
 )
@@ -43,7 +43,7 @@ func newSnapshotListCommand() *cobra.Command {
 				WriteError(err)
 				return ErrAlreadyReported
 			}
-			store, err := server.NewSnapshotStore(abs)
+			store, err := gateway.NewSnapshotStore(abs)
 			if err != nil {
 				WriteError(err)
 				return ErrAlreadyReported
@@ -84,7 +84,7 @@ func newSnapshotSaveCommand() *cobra.Command {
 				WriteError(err)
 				return ErrAlreadyReported
 			}
-			store, err := server.NewSnapshotStore(abs)
+			store, err := gateway.NewSnapshotStore(abs)
 			if err != nil {
 				WriteError(err)
 				return ErrAlreadyReported
@@ -127,7 +127,7 @@ func newSnapshotLabelCommand() *cobra.Command {
 				WriteError(err)
 				return ErrAlreadyReported
 			}
-			store, err := server.NewSnapshotStore(abs)
+			store, err := gateway.NewSnapshotStore(abs)
 			if err != nil {
 				WriteError(err)
 				return ErrAlreadyReported
@@ -170,7 +170,7 @@ func newSnapshotReadCommand() *cobra.Command {
 				WriteError(err)
 				return ErrAlreadyReported
 			}
-			store, err := server.NewSnapshotStore(abs)
+			store, err := gateway.NewSnapshotStore(abs)
 			if err != nil {
 				WriteError(err)
 				return ErrAlreadyReported
@@ -215,12 +215,12 @@ current file on disk.`,
 				WriteError(err)
 				return ErrAlreadyReported
 			}
-			store, err := server.NewSnapshotStore(abs)
+			store, err := gateway.NewSnapshotStore(abs)
 			if err != nil {
 				WriteError(err)
 				return ErrAlreadyReported
 			}
-			var hunks []server.DiffHunk
+			var hunks []gateway.DiffHunk
 			if b == "" {
 				raw, err := os.ReadFile(abs)
 				if err != nil {
@@ -242,7 +242,7 @@ current file on disk.`,
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
 			enc.SetEscapeHTML(false)
-			if err := enc.Encode(server.DiffResponse{Hunks: hunks}); err != nil {
+			if err := enc.Encode(gateway.DiffResponse{Hunks: hunks}); err != nil {
 				WriteError(err)
 				return ErrAlreadyReported
 			}

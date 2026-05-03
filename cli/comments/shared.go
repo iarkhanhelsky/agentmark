@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"agentmark/server"
+	"agentmark/gateway"
 )
 
 const agentIntroMaxLen = 40
@@ -35,13 +35,13 @@ func validateAgentBody(role, body string) error {
 	return nil
 }
 
-func filterCommentThreads(threads []server.CommentThread, openOnly, resolvedOnly, detachedOnly bool) []server.CommentThread {
+func filterCommentThreads(threads []gateway.CommentThread, openOnly, resolvedOnly, detachedOnly bool) []gateway.CommentThread {
 	if !openOnly && !resolvedOnly && !detachedOnly {
-		out := make([]server.CommentThread, len(threads))
+		out := make([]gateway.CommentThread, len(threads))
 		copy(out, threads)
 		return out
 	}
-	var filtered []server.CommentThread
+	var filtered []gateway.CommentThread
 	for _, t := range threads {
 		if openOnly && (t.Resolved || t.Detached) {
 			continue
@@ -58,8 +58,8 @@ func filterCommentThreads(threads []server.CommentThread, openOnly, resolvedOnly
 }
 
 // filterAwaitingAgentReply keeps threads whose last message is role "user" (typical queue for an agent reply).
-func filterAwaitingAgentReply(threads []server.CommentThread) []server.CommentThread {
-	out := make([]server.CommentThread, 0, len(threads))
+func filterAwaitingAgentReply(threads []gateway.CommentThread) []gateway.CommentThread {
+	out := make([]gateway.CommentThread, 0, len(threads))
 	for _, t := range threads {
 		n := len(t.Thread)
 		if n == 0 {
@@ -73,23 +73,23 @@ func filterAwaitingAgentReply(threads []server.CommentThread) []server.CommentTh
 }
 
 // listThreadsForMarkdown loads sidecar, re-anchors against markdown, optionally persists, returns filtered threads.
-func listThreadsForMarkdown(abs string, openOnly, resolvedOnly, detachedOnly, alwaysSave bool) ([]server.CommentThread, error) {
+func listThreadsForMarkdown(abs string, openOnly, resolvedOnly, detachedOnly, alwaysSave bool) ([]gateway.CommentThread, error) {
 	raw, err := os.ReadFile(abs)
 	if err != nil {
 		return nil, err
 	}
 	markdown := string(raw)
-	threads, err := server.LoadThreads(abs)
+	threads, err := gateway.LoadThreads(abs)
 	if err != nil {
 		return nil, err
 	}
-	snap, _ := server.NewSnapshotStore(abs)
-	threads = server.ReanchorThreadsWithStore(markdown, threads, snap)
-	sidecar := server.CommentsPathFor(abs)
+	snap, _ := gateway.NewSnapshotStore(abs)
+	threads = gateway.ReanchorThreadsWithStore(markdown, threads, snap)
+	sidecar := gateway.CommentsPathFor(abs)
 	_, statErr := os.Stat(sidecar)
 	hadSidecar := statErr == nil
 	if alwaysSave || len(threads) > 0 || hadSidecar {
-		if err := server.SaveThreads(abs, threads); err != nil {
+		if err := gateway.SaveThreads(abs, threads); err != nil {
 			return nil, err
 		}
 	}

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"agentmark/cli/internal/cmdcore"
-	"agentmark/server"
+	"agentmark/gateway"
 
 	"github.com/spf13/cobra"
 )
@@ -53,28 +53,28 @@ func runAdd(pathArg, anchor, body, role string) error {
 		return cmdcore.ErrAlreadyReported
 	}
 	markdown := string(raw)
-	threads, err := server.LoadThreads(abs)
+	threads, err := gateway.LoadThreads(abs)
 	if err != nil {
 		cmdcore.WriteError(err)
 		return cmdcore.ErrAlreadyReported
 	}
 	id := fmt.Sprintf("cli-%d", time.Now().UnixNano())
-	t := server.CommentThread{ID: id, AnchorText: strings.TrimSpace(anchor), Thread: nil}
+	t := gateway.CommentThread{ID: id, AnchorText: strings.TrimSpace(anchor), Thread: nil}
 	hint := strings.Index(markdown, anchor)
 	if hint < 0 {
 		cmdcore.WriteError(fmt.Errorf("anchor text not found exactly in file; copy the exact markdown substring (including backticks/punctuation)"))
 		return cmdcore.ErrAlreadyReported
 	}
 	end := hint + len(strings.TrimSpace(anchor))
-	an := server.BuildAnchor(markdown, hint, end)
+	an := gateway.BuildAnchor(markdown, hint, end)
 	t.Anchor = &an
-	t.Thread = append(t.Thread, server.CommentMessage{
+	t.Thread = append(t.Thread, gateway.CommentMessage{
 		Role: role, Body: body, TS: time.Now().UnixMilli(),
 	})
 	threads = append(threads, t)
-	snap, _ := server.NewSnapshotStore(abs)
-	threads = server.ReanchorThreadsWithStore(markdown, threads, snap)
-	if err := server.SaveThreads(abs, threads); err != nil {
+	snap, _ := gateway.NewSnapshotStore(abs)
+	threads = gateway.ReanchorThreadsWithStore(markdown, threads, snap)
+	if err := gateway.SaveThreads(abs, threads); err != nil {
 		cmdcore.WriteError(err)
 		return cmdcore.ErrAlreadyReported
 	}

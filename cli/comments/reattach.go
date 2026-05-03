@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"agentmark/cli/internal/cmdcore"
-	"agentmark/server"
+	"agentmark/gateway"
 
 	"github.com/spf13/cobra"
 )
@@ -16,7 +16,7 @@ import (
 func NewReattachCommand() *cobra.Command {
 	var threadID, anchor string
 	c := &cobra.Command{
-		Use:   "reattach <file.md>",
+		Use: "reattach <file.md>",
 		Aliases: []string{
 			"reattach-apply",
 		},
@@ -50,7 +50,7 @@ func runReattach(pathArg, threadID, anchor string) error {
 		return cmdcore.ErrAlreadyReported
 	}
 	markdown := string(raw)
-	threads, err := server.LoadThreads(abs)
+	threads, err := gateway.LoadThreads(abs)
 	if err != nil {
 		cmdcore.WriteError(err)
 		return cmdcore.ErrAlreadyReported
@@ -66,7 +66,7 @@ func runReattach(pathArg, threadID, anchor string) error {
 		hint := strings.Index(markdown, at)
 		if hint >= 0 {
 			end := hint + len(at)
-			an := server.BuildAnchor(markdown, hint, end)
+			an := gateway.BuildAnchor(markdown, hint, end)
 			threads[i].Anchor = &an
 		} else {
 			threads[i].Anchor = nil
@@ -77,9 +77,9 @@ func runReattach(pathArg, threadID, anchor string) error {
 		cmdcore.WriteError(fmt.Errorf("thread not found"))
 		return cmdcore.ErrAlreadyReported
 	}
-	snap, _ := server.NewSnapshotStore(abs)
-	threads = server.ReanchorThreadsWithStore(markdown, threads, snap)
-	if err := server.SaveThreads(abs, threads); err != nil {
+	snap, _ := gateway.NewSnapshotStore(abs)
+	threads = gateway.ReanchorThreadsWithStore(markdown, threads, snap)
+	if err := gateway.SaveThreads(abs, threads); err != nil {
 		cmdcore.WriteError(err)
 		return cmdcore.ErrAlreadyReported
 	}
