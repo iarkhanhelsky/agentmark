@@ -15,6 +15,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	// defaultPort is the default port for the review UI.
+	defaultPort = "4173"
+)
+
 // Execute runs the root command (and exits the process on error via the caller).
 func Execute() error {
 	return newRootCmd().Execute()
@@ -57,7 +62,7 @@ Snapshot history is kept under the OS app data directory (see README).`,
 	}
 
 	cmd.Flags().SortFlags = false
-	cmd.Flags().StringVar(&port, "port", "4173", "HTTP listen port for the review UI")
+	cmd.Flags().StringVar(&port, "port", defaultPort, "HTTP listen port for the review UI")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open a browser tab")
 
 	cmd.AddCommand(

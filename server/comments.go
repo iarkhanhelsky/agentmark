@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -195,7 +196,7 @@ func chooseBestAnchorIndex(markdown string, thread CommentThread) int {
 				suffixHit = 1
 			}
 		}
-		distance := abs(startOffset - a.StartOffset)
+		distance := int(math.Abs(float64(startOffset - a.StartOffset)))
 		score := prefixHit*2 + suffixHit*2 - float64(distance)/1000
 		if first || score > best.score {
 			best = scored{startOffset, score}
@@ -413,25 +414,4 @@ func pickCanonicalThread(a, b CommentThread) CommentThread {
 		return b
 	}
 	return a
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
 }
