@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 286 34" width="286" height="34" role="img" aria-label="AgentMark">
+  <defs>
+    <style>
+      .glyph {
+        fill: none;
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .word {
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font-weight: 700;
+        font-size: 17px;
+        letter-spacing: -0.03em;
+      }
+      .agent {
+        fill: #141414;
+      }
+      .mark {
+        fill: #4f46e5;
+      }
+      .prompt {
+        font-family: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+        font-weight: 600;
+        font-size: 0.88em;
+        letter-spacing: -0.04em;
+      }
+      @media (prefers-color-scheme: dark) {
+        .glyph {
+          stroke: #a5b4fc;
+        }
+        .agent {
+          fill: #e6edf3;
+        }
+        .mark {
+          fill: #a5b4fc;
+        }
+      }
+    </style>
+  </defs>
+  <path class="glyph" transform="translate(1, 6)" d="M4 14l4-4 4 4 8-8" stroke="#4f46e5" />
+  <text x="30" y="24" class="word">
+    <tspan class="agent" fill="#141414">Agent</tspan><tspan class="mark" fill="#4f46e5">Mark</tspan><tspan class="mark prompt" fill="#4f46e5">&gt;_</tspan>
+  </text>
+</svg>
