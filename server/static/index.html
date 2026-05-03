@@ -261,104 +261,110 @@
           </aside>
 
           <!-- Side rail: comment cards align here — never overlaps prose -->
-          <div class="bubble-rail" id="bubble-rail" x-show="viewMode === 'preview'" aria-live="polite">
-            <div
-              class="comment-bubble comment-thread-popover"
-              :class="{ 'comment-bubble-fading': bubbleFading }"
-              x-show="activeThreadId && bubble.open && activeThread"
-              x-cloak
-              @click.stop
-              :style="`top:${bubble.top}px`"
-            >
-              <div class="bubble-inner">
-                <div class="bubble-card-head">
-                  <span class="bubble-author">Thread</span>
-                  <div class="bubble-head-actions">
-                    <button
-                      type="button"
-                      class="bubble-icon-btn bubble-icon-btn-danger"
-                      @click="deleteThread(activeThreadId)"
-                      title="Delete thread"
-                      aria-label="Delete thread"
-                    >
-                      <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
-                    </button>
-                    <button
-                      type="button"
-                      class="bubble-icon-btn"
-                      @click="toggleResolve(activeThreadId, !(activeThread && activeThread.resolved))"
-                      :title="activeThread && activeThread.resolved ? 'Unresolve' : 'Resolve'"
-                    >
-                      <i class="fa-solid fa-check" aria-hidden="true" x-show="!(activeThread && activeThread.resolved)"></i>
-                      <i class="fa-solid fa-arrow-rotate-left" aria-hidden="true" x-show="activeThread && activeThread.resolved"></i>
-                    </button>
-                    <button type="button" class="bubble-icon-btn" @click="closeThread()" title="Close">
-                      <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-                    </button>
-                  </div>
-                </div>
-                <div class="bubble-card-body">
-                  <p class="bubble-detached-banner" x-show="activeThread && activeThread.detached" x-cloak>
-                    <i class="fa-solid fa-link-slash" aria-hidden="true"></i>
-                    Off-document — select text and use <strong>Re-attach</strong> in the toolbar chip menu, or the
-                    selection popover after highlighting text.
-                  </p>
-                  <div class="anchor-preview" x-show="activeThread && activeThread.anchorText">
-                    &ldquo;<span x-text="activeThread && activeThread.anchorText"></span>&rdquo;
-                  </div>
-                  <div class="thread-parent" x-show="activeThread">
-                    <div class="thread-row-head" :class="{ 'thread-msg-new': messageIsNew(parentMessage(activeThread)) }">
-                      <div
-                        class="thread-avatar thread-avatar-lg"
-                        :class="avatarClass(parentMessage(activeThread), true)"
-                        x-text="avatarLetter(parentMessage(activeThread), activeThread, true)"
-                      ></div>
-                      <span class="thread-author" x-text="messageAuthor(parentMessage(activeThread))"></span>
-                      <span class="thread-time" x-text="messageRelativeTime(parentMessage(activeThread))"></span>
+          <div
+            class="bubble-rail"
+            id="bubble-rail"
+            x-show="viewMode === 'preview'"
+            aria-live="polite"
+            :style="bubbleRailMinHeightPx > 0 ? `min-height:${bubbleRailMinHeightPx}px` : ''"
+          >
+            <template x-for="card in threadLayout" :key="card.id">
+              <div
+                class="comment-card"
+                :data-thread-id="card.id"
+                :class="{ 'comment-card-active': activeThreadId === card.id, 'comment-card-resolved': threadById(card.id) && threadById(card.id).resolved }"
+                :style="`top:${card.top}px`"
+              >
+                <div class="bubble-inner" @click="openThread(card.id)">
+                  <div class="bubble-card-head">
+                    <span class="bubble-author" x-text="bubbleAuthorLabel(threadById(card.id))"></span>
+                    <div class="bubble-head-actions">
+                      <button
+                        type="button"
+                        class="bubble-icon-btn bubble-icon-btn-danger"
+                        @click.stop="deleteThread(card.id)"
+                        title="Delete thread"
+                        aria-label="Delete thread"
+                      >
+                        <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+                      </button>
+                      <button
+                        type="button"
+                        class="bubble-icon-btn"
+                        @click.stop="toggleResolve(card.id, !(threadById(card.id) && threadById(card.id).resolved))"
+                        :title="threadById(card.id) && threadById(card.id).resolved ? 'Unresolve' : 'Resolve'"
+                      >
+                        <i class="fa-solid fa-check" aria-hidden="true" x-show="!(threadById(card.id) && threadById(card.id).resolved)"></i>
+                        <i class="fa-solid fa-arrow-rotate-left" aria-hidden="true" x-show="threadById(card.id) && threadById(card.id).resolved"></i>
+                      </button>
+                      <button
+                        type="button"
+                        class="bubble-icon-btn"
+                        @click.stop="activeThreadId === card.id ? closeThread() : null"
+                        title="Clear focus"
+                        aria-label="Clear focus"
+                      >
+                        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                      </button>
                     </div>
-                    <p class="thread-body" x-html="formatText(messageBody(parentMessage(activeThread)))"></p>
                   </div>
-                  <div class="thread-replies" x-show="replyMessages(activeThread).length">
-                    <template x-for="(m, idx) in replyMessages(activeThread)" :key="idx">
-                      <div class="bubble-msg-row thread-reply-row" :class="[messageRoleRowClass(m), messageIsNew(m) ? 'thread-msg-new' : '']">
-                        <div class="thread-row-head thread-row-head-reply">
+                  <div class="bubble-card-body">
+                    <p class="bubble-detached-banner" x-show="threadById(card.id) && threadById(card.id).detached" x-cloak>
+                      <i class="fa-solid fa-link-slash" aria-hidden="true"></i>
+                      Off-document — select text and use <strong>Re-attach</strong> in the toolbar chip menu, or the
+                      selection popover after highlighting text.
+                    </p>
+                    <template x-for="(m, idx) in nonEmptyMessages(threadById(card.id))" :key="card.id + '-' + idx">
+                      <div
+                        :class="idx === 0 ? 'thread-parent' : 'bubble-msg-row thread-reply-row ' + messageRoleRowClass(m) + (messageIsNew(m) ? ' thread-msg-new' : '')"
+                      >
+                        <div
+                          class="thread-row-head"
+                          :class="{ 'thread-row-head-reply': idx > 0, 'thread-msg-new': idx === 0 && messageIsNew(m) }"
+                        >
                           <div
                             class="thread-avatar"
-                            :class="avatarClass(m, false)"
-                            x-text="avatarLetter(m, activeThread, false)"
+                            :class="(idx === 0 ? 'thread-avatar-lg ' : '') + avatarClass(m, idx === 0)"
+                            x-text="avatarLetter(m, threadById(card.id), idx === 0)"
                           ></div>
                           <span class="thread-author" x-text="messageAuthor(m)"></span>
                           <span class="thread-time" x-text="messageRelativeTime(m)"></span>
                         </div>
-                        <p class="bubble-msg-body thread-reply-body" x-html="formatText(m.body)"></p>
+                        <p
+                          class="thread-body"
+                          :class="{ 'bubble-msg-body thread-reply-body': idx > 0, 'body-clamped': isBodyLong(messageBody(m)) && !isBodyExpanded(msgKey(card.id, idx)) }"
+                          x-html="formatText(messageBody(m))"
+                          @click.stop="activeThreadId !== card.id ? openThread(card.id) : (isBodyLong(messageBody(m)) ? toggleBodyExpand(msgKey(card.id, idx)) : openThread(card.id))"
+                        ></p>
+                        <button
+                          type="button"
+                          class="show-more-btn"
+                          x-show="isBodyLong(messageBody(m))"
+                          @click.stop="toggleBodyExpand(msgKey(card.id, idx))"
+                          x-text="isBodyExpanded(msgKey(card.id, idx)) ? 'Show less' : 'Show more'"
+                        ></button>
                       </div>
                     </template>
+                    <p class="bubble-empty" x-show="threadById(card.id) && nonEmptyMessages(threadById(card.id)).length === 0">
+                      <span x-show="activeThreadId === card.id">Start the thread with a reply.</span>
+                      <span x-show="activeThreadId !== card.id">No messages yet.</span>
+                    </p>
                   </div>
-                  <p class="bubble-empty" x-show="!messageBody(parentMessage(activeThread))">
-                    Start the thread with a reply.
-                  </p>
-                  <template x-if="activeThread && !(activeThread.thread || []).length">
-                    <div class="bubble-msg-row bubble-msg-row--unknown">
-                      <p class="bubble-msg-body thread-reply-body">
-                        No replies yet.
-                      </p>
-                    </div>
-                  </template>
-                </div>
-                <div class="bubble-card-footer">
-                  <textarea
-                    class="bubble-reply-input"
-                    placeholder="Reply or use @mention..."
-                    x-model="drafts[activeThreadId]"
-                    rows="1"
-                    @keydown="onReplyKeydown(activeThreadId, $event)"
-                  ></textarea>
-                  <button type="button" class="bubble-send-btn btn-send" @click="sendReply(activeThreadId)" title="Send">
-                    <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
-                  </button>
+                  <div class="bubble-card-footer" x-show="activeThreadId === card.id" @click.stop>
+                    <textarea
+                      class="bubble-reply-input"
+                      placeholder="Reply or add others with @"
+                      x-model="drafts[card.id]"
+                      rows="1"
+                      @keydown="onReplyKeydown(card.id, $event)"
+                    ></textarea>
+                    <button type="button" class="bubble-send-btn btn-send" @click="sendReply(card.id)" title="Send">
+                      <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
+            </template>
           </div>
 
           <div

@@ -13,9 +13,9 @@ function shell() {
     historyOpen: false,
     activeThreadId: null,
     gutterLayout: [],
-    bubble: { open: false, top: 0 },
-    bubbleFading: false,
-    _bubbleFadeTimer: null,
+    threadLayout: [],
+    expandedBodies: {},
+    bubbleRailMinHeightPx: 0,
     drafts: {},
     toolbar: { show: false, top: 0, left: 0 },
     sel: { text: "", prefix: "", suffix: "" },
@@ -38,6 +38,7 @@ function shell() {
     _scrollScheduled: false,
     _pendingOpenId: null,
     _gutterPinsAfterLoadScheduled: false,
+    _layoutAfterLoadScheduled: false,
     detachedPanelOpen: false,
     sidebarCollapsed: false,
 
@@ -105,6 +106,12 @@ function shell() {
       this.fetchFileMeta();
       this.fetchProjectTree();
       this.connectWS();
+      this.$watch("activeThreadId", (newId) => {
+        document.querySelectorAll(".anchor-mark.active").forEach((el) => el.classList.remove("active"));
+        if (newId) {
+          document.querySelectorAll(`.anchor-mark[data-thread-id="${newId}"]`).forEach((el) => el.classList.add("active"));
+        }
+      });
     },
 
     initSidebarState() {
@@ -400,6 +407,7 @@ function shell() {
         this.renderedHtml = "";
         this.$nextTick(() => {
           this.gutterLayout = [];
+          this.threadLayout = [];
         });
         return;
       }
@@ -409,6 +417,10 @@ function shell() {
       this.$nextTick(() => {
         this.wireMarks();
         this.updateGutterPins();
+        this.computeThreadLayout();
+        this.$nextTick(() => {
+          requestAnimationFrame(() => this.computeThreadLayout());
+        });
       });
     },
 
@@ -478,50 +490,140 @@ function shell() {
       requestAnimationFrame(() => {
         this._scrollScheduled = false;
         this.updateGutterPins();
-        if (this.activeThreadId && this.bubble.open) {
-          this.positionBubbleForThread(this.activeThreadId, null);
-        }
+        this.computeThreadLayout();
       });
     },
 
     openThread(id, ev) {
-      if (this._bubbleFadeTimer) {
-        clearTimeout(this._bubbleFadeTimer);
-        this._bubbleFadeTimer = null;
-      }
-      this.bubbleFading = false;
       this.toolbar.show = false;
+      const prev = this.activeThreadId;
       this.activeThreadId = id;
-      this.bubble.open = true;
       this.markThreadSeen(id);
-      const evRef = ev;
-      this.$nextTick(() => this.positionBubbleForThread(id, evRef));
+      if (id !== prev) {
+        const t = this.threadById(id);
+        if (t) {
+          const msgs = (t.thread || []).filter((m) => (m.body || "").trim() !== "");
+          const next = { ...this.expandedBodies };
+          for (let i = 0; i < msgs.length; i++) {
+            next[this.msgKey(id, i)] = true;
+          }
+          this.expandedBodies = next;
+        }
+      }
+      this.$nextTick(() => {
+        this.computeThreadLayout();
+        this.$nextTick(() => {
+          requestAnimationFrame(() => this.computeThreadLayout());
+        });
+      });
     },
 
-    positionBubbleForThread(id, ev) {
+    threadById(id) {
+      if (!id) return null;
+      return this.threads.find((x) => x.id === id) || null;
+    },
+
+    msgKey(threadId, msgIdx) {
+      return `${threadId}:${msgIdx}`;
+    },
+
+    isBodyLong(body) {
+      const s = body != null ? String(body) : "";
+      return s.length > 140;
+    },
+
+    isBodyExpanded(key) {
+      return !!this.expandedBodies[key];
+    },
+
+    toggleBodyExpand(key) {
+      const cur = !!this.expandedBodies[key];
+      this.expandedBodies = { ...this.expandedBodies, [key]: !cur };
+      this.$nextTick(() => {
+        requestAnimationFrame(() => this.computeThreadLayout());
+      });
+    },
+
+    nonEmptyMessages(thread) {
+      return ((thread && thread.thread) || []).filter((m) => (m.body || "").trim() !== "");
+    },
+
+    computeThreadLayout() {
+      if (this.viewMode !== "preview") {
+        this.threadLayout = [];
+        return;
+      }
       if (typeof document !== "undefined" && document.readyState !== "complete") {
-        window.addEventListener("load", () => this.$nextTick(() => this.positionBubbleForThread(id, ev)), { once: true });
+        if (!this._layoutAfterLoadScheduled) {
+          this._layoutAfterLoadScheduled = true;
+          window.addEventListener(
+            "load",
+            () => {
+              this._layoutAfterLoadScheduled = false;
+              this.$nextTick(() => this.computeThreadLayout());
+            },
+            { once: true }
+          );
+        }
         return;
       }
       const rail = document.getElementById("bubble-rail");
-      if (!rail) return;
-      const mark = document.querySelector(`.anchor-mark[data-thread-id="${id}"]`);
-      if (mark) {
+      if (!rail) {
+        this.threadLayout = [];
+        return;
+      }
+      const railRect = rail.getBoundingClientRect();
+      const items = [];
+      for (const t of this.visibleThreads) {
+        if (t.resolved && !this.showResolved) continue;
+        const mark = document.querySelector(`.anchor-mark[data-thread-id="${t.id}"]`);
+        if (!mark) continue;
         const mr = mark.getBoundingClientRect();
-        const rr = rail.getBoundingClientRect();
-        let top = mr.top - rr.top + mr.height / 2 - 24;
-        this.bubble = { open: true, top: Math.max(8, top) };
+        const idealY = mr.top - railRect.top;
+        const el = document.querySelector(`.comment-card[data-thread-id="${t.id}"]`);
+        const h = el && el.offsetHeight ? el.offsetHeight : 120;
+        items.push({ id: t.id, idealY, height: h });
+      }
+      items.sort((a, b) => a.idealY - b.idealY);
+      const n = items.length;
+      if (n === 0) {
+        this.threadLayout = [];
+        this.bubbleRailMinHeightPx = 0;
         return;
       }
-      if (ev && ev.currentTarget && ev.currentTarget.getBoundingClientRect) {
-        const pr = ev.currentTarget.getBoundingClientRect();
-        const rr = rail.getBoundingClientRect();
-        let top = pr.top - rr.top + pr.height / 2 - 24;
-        this.bubble = { open: true, top: Math.max(8, top) };
-        return;
+      const gap = 12;
+      const tops = new Array(n).fill(0);
+      let focusIdx = items.findIndex((x) => x.id === this.activeThreadId);
+      if (focusIdx < 0) focusIdx = -1;
+
+      if (focusIdx < 0) {
+        tops[0] = Math.max(0, items[0].idealY);
+        for (let i = 1; i < n; i++) {
+          tops[i] = Math.max(items[i].idealY, tops[i - 1] + items[i - 1].height + gap);
+        }
+      } else {
+        tops[focusIdx] = Math.max(0, items[focusIdx].idealY);
+        for (let i = focusIdx + 1; i < n; i++) {
+          tops[i] = Math.max(items[i].idealY, tops[i - 1] + items[i - 1].height + gap);
+        }
+        for (let i = focusIdx - 1; i >= 0; i--) {
+          tops[i] = Math.min(items[i].idealY, tops[i + 1] - gap - items[i].height);
+        }
+        if (tops[0] < 0) {
+          const shift = -tops[0];
+          for (let i = 0; i < n; i++) tops[i] += shift;
+        }
+        for (let i = 1; i < n; i++) {
+          const minTop = tops[i - 1] + items[i - 1].height + gap;
+          if (tops[i] < minTop) tops[i] = minTop;
+        }
       }
-      const rr = rail.getBoundingClientRect();
-      this.bubble = { open: true, top: Math.max(8, Math.min(48, rr.height * 0.15)) };
+
+      this.threadLayout = items.map((it, i) => ({ id: it.id, top: tops[i] }));
+      const maxBottom = items.reduce((mx, it, i) => Math.max(mx, tops[i] + it.height), 0) + 32;
+      const previewCol = document.querySelector(".preview-col");
+      const ph = previewCol ? previewCol.offsetHeight : 0;
+      this.bubbleRailMinHeightPx = Math.max(ph, maxBottom, rail.offsetHeight || 0);
     },
 
     threadPreview(t) {
@@ -608,30 +710,18 @@ function shell() {
         return;
       }
       if (this.activeThreadId === threadId) {
-        if (this._bubbleFadeTimer) {
-          clearTimeout(this._bubbleFadeTimer);
-          this._bubbleFadeTimer = null;
-        }
-        this.bubbleFading = false;
         this.activeThreadId = null;
-        this.bubble.open = false;
       }
       delete this.drafts[threadId];
     },
 
     async closeThread() {
-      if (this._bubbleFadeTimer) {
-        clearTimeout(this._bubbleFadeTimer);
-        this._bubbleFadeTimer = null;
-      }
-      this.bubbleFading = false;
       const id = this.activeThreadId;
       const t = id ? this.threads.find((x) => x.id === id) : null;
       const hasMsgs = this.threadHasMessages(t);
       const draft = id ? (this.drafts[id] || "").trim() : "";
 
       this.activeThreadId = null;
-      this.bubble.open = false;
 
       if (id && t && !hasMsgs && !draft) {
         try {
@@ -644,6 +734,10 @@ function shell() {
           /* ignore */
         }
       }
+      this.$nextTick(() => {
+        this.computeThreadLayout();
+        requestAnimationFrame(() => this.computeThreadLayout());
+      });
     },
 
     onPreviewMouseUp() {
@@ -757,6 +851,9 @@ function shell() {
         body: JSON.stringify({ id: threadId, body }),
       });
       this.drafts[threadId] = "";
+      this.$nextTick(() => {
+        requestAnimationFrame(() => this.computeThreadLayout());
+      });
     },
 
     onReplyKeydown(threadId, event) {
@@ -775,13 +872,12 @@ function shell() {
         alert(await res.text());
         return;
       }
-      if (resolved && this.activeThreadId === threadId && this.bubble.open) {
-        if (this._bubbleFadeTimer) clearTimeout(this._bubbleFadeTimer);
-        this.bubbleFading = true;
-        this._bubbleFadeTimer = setTimeout(() => {
-          this._bubbleFadeTimer = null;
-          this.closeThread();
-        }, 520);
+      if (resolved && this.activeThreadId === threadId) {
+        this.activeThreadId = null;
+        this.$nextTick(() => {
+          this.computeThreadLayout();
+          requestAnimationFrame(() => this.computeThreadLayout());
+        });
       }
     },
 
