@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -e
+
+>&2 echo "WARN!! dev version"
+>&2 echo ""
+exec go run "$(dirname "$0")/.." "$@"
