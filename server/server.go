@@ -342,7 +342,7 @@ func (a *App) handleUpsert(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	} else {
-		t := CommentThread{ID: req.ID, AnchorText: req.AnchorText, Thread: nil}
+		t := CommentThread{ID: req.ID, AnchorText: req.AnchorText, Thread: []CommentMessage{}}
 		if req.Anchor != nil {
 			hint := req.Anchor.StartOffset
 			if hint < 0 {

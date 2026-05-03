@@ -56,6 +56,15 @@ agentmark comments list . --open --awaiting-agent   # actionable open threads wa
 
 Make `comments list` your default first step before substantive edits so thread context is loaded before you decide what to rewrite.
 
+### Proactive awareness (Web UI comments)
+
+LLM sessions do not automatically poll the repo. Something in **your** workflow must surface new sidecar activity:
+
+- **Standing instruction:** Add to AGENTS.md / Cursor rules (or equivalent) that the agent should run `agentmark comments list <paths> --open --awaiting-agent` at the start of a task or after human review time.
+- **Filesystem:** Watch `*.comments.json` with `entr`, `fswatch`, or a short IDE task; on change, run `comments list` and paste or pipe the JSON summary into the agent.
+- **Hooks:** Cursor/Claude hooks can call a tiny script on sidecar save—the script should stay vendor-agnostic (invoke `agentmark`, print stdout). Same pattern works in other IDEs with file-watch tasks.
+- **Future product:** A `comments watch` subcommand (newline-delimited JSON events) would reduce glue code; until then, polling + watchers are the portable contract (see roadmap P0).
+
 ### Message body format (`--role agent`)
 
 When you post with `--role agent` (the default), the first line must identify **where the message came from** so threads stay attributable. Use a single short token:

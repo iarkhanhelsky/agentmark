@@ -227,6 +227,62 @@ func TestIntegrationServeStartupShutdown(t *testing.T) {
 	}
 }
 
+func TestIntegrationUpsertThreadWithoutMessageStoresEmptyThreadSlice(t *testing.T) {
+	t.Setenv("AGENTMARK_DATA_DIR", t.TempDir())
+	root := t.TempDir()
+	file := filepath.Join(root, "doc.md")
+	if err := os.WriteFile(file, []byte("# Doc\n\nHello\n"), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+	port := freeTCPPort(t)
+	baseURL := fmt.Sprintf("http://127.0.0.1:%s", port)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Start(ctx, Config{FilePath: file, Port: port})
+	}()
+	waitForReady(t, baseURL)
+
+	postJSONExpectStatus(t, baseURL+"/api/threads/upsert", map[string]any{
+		"id":         "empty-msg-thread",
+		"anchorText": "Hello",
+	}, http.StatusOK)
+
+	sidecar := filepath.Join(root, ".doc.md.comments.json")
+	raw, err := os.ReadFile(sidecar)
+	if err != nil {
+		t.Fatalf("read sidecar: %v", err)
+	}
+	if strings.Contains(string(raw), `"thread":null`) {
+		t.Fatalf("sidecar should serialize thread as empty array, not null: %s", string(raw))
+	}
+	var cf CommentsFile
+	if err := json.Unmarshal(raw, &cf); err != nil {
+		t.Fatalf("unmarshal sidecar: %v", err)
+	}
+	if len(cf.Threads) != 1 {
+		t.Fatalf("threads count = %d, want 1", len(cf.Threads))
+	}
+	if cf.Threads[0].Thread == nil {
+		t.Fatal("decoded Thread slice is nil")
+	}
+	if len(cf.Threads[0].Thread) != 0 {
+		t.Fatalf("message count = %d, want 0", len(cf.Threads[0].Thread))
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("start returned error: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("server did not stop on cancel")
+	}
+}
+
 func TestIntegrationServePushesThreadsUpdateOnExternalSidecarWrite(t *testing.T) {
 	t.Setenv("AGENTMARK_DATA_DIR", t.TempDir())
 	root := t.TempDir()
