@@ -37,6 +37,7 @@ function shell() {
     _unreadThreadIds: new Set(),
     _scrollScheduled: false,
     _pendingOpenId: null,
+    _gutterPinsAfterLoadScheduled: false,
     detachedPanelOpen: false,
     sidebarCollapsed: false,
 
@@ -427,6 +428,21 @@ function shell() {
         this.gutterLayout = [];
         return;
       }
+      /* Avoid getBoundingClientRect while external stylesheets may still be loading (FOUC / devtools warning). */
+      if (typeof document !== "undefined" && document.readyState !== "complete") {
+        if (!this._gutterPinsAfterLoadScheduled) {
+          this._gutterPinsAfterLoadScheduled = true;
+          window.addEventListener(
+            "load",
+            () => {
+              this._gutterPinsAfterLoadScheduled = false;
+              this.$nextTick(() => this.updateGutterPins());
+            },
+            { once: true }
+          );
+        }
+        return;
+      }
       const root = document.querySelector(".doc-review-row");
       if (!root) {
         this.gutterLayout = [];
@@ -483,6 +499,10 @@ function shell() {
     },
 
     positionBubbleForThread(id, ev) {
+      if (typeof document !== "undefined" && document.readyState !== "complete") {
+        window.addEventListener("load", () => this.$nextTick(() => this.positionBubbleForThread(id, ev)), { once: true });
+        return;
+      }
       const rail = document.getElementById("bubble-rail");
       if (!rail) return;
       const mark = document.querySelector(`.anchor-mark[data-thread-id="${id}"]`);
