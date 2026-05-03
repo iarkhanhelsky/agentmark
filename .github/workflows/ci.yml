@@ -17,11 +17,5 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Download modules
-        run: go mod download
-
-      - name: Run tests
-        run: go test -count=1 ./...
-
-      - name: Build
-        run: go build -o /tmp/agentmark .
+      - name: fmt, vet, test, build
+        run: make ci

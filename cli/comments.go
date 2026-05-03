@@ -292,7 +292,7 @@ func newCommentsAddCommand() *cobra.Command {
 func newCommentsReattachCommand() *cobra.Command {
 	var threadID, anchor string
 	c := &cobra.Command{
-		Use:   "reattach <file.md>",
+		Use: "reattach <file.md>",
 		Aliases: []string{
 			"reattach-apply",
 		},

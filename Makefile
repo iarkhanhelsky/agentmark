@@ -1,4 +1,4 @@
-.PHONY: build run test vet fmt clean
+.PHONY: build run test vet fmt fmt-check ci clean
 
 GO      ?= go
 BINARY  ?= agentmark
@@ -19,6 +19,16 @@ vet:
 
 fmt:
 	$(GO) fmt ./...
+
+fmt-check:
+	@out=$$(gofmt -l .); \
+	if [ -n "$$out" ]; then \
+		echo "not formatted (run make fmt):"; \
+		echo "$$out"; \
+		exit 1; \
+	fi
+
+ci: fmt-check vet test build
 
 clean:
 	rm -f $(BINARY)
