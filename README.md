@@ -1,4 +1,4 @@
-<h1 align="left"><img src="docs/readme-wordmark.svg" width="286" height="34" alt="AgentMark" /></h1>
+<h1 align="left"><img src="docs/readme-wordmark.svg"  height="96" alt="AgentMark" /></h1>
 
 **Motivation.** When you and an agent iterate on markdown, you need feedback tied to exact passages, not scattered chat context. AgentMark gives you anchored threads so humans can steer edits and agents can respond precisely.
 
