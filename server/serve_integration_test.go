@@ -227,6 +227,138 @@ func TestIntegrationServeStartupShutdown(t *testing.T) {
 	}
 }
 
+func TestIntegrationServeDoesNotCreateEmptySidecarOnStartup(t *testing.T) {
+	t.Setenv("AGENTMARK_DATA_DIR", t.TempDir())
+	root := t.TempDir()
+	file := filepath.Join(root, "doc.md")
+	if err := os.WriteFile(file, []byte("# Doc\n\n"), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+	sidecar := CommentsPathFor(file)
+	if _, err := os.Stat(sidecar); err == nil {
+		t.Fatalf("precondition: sidecar should not exist yet")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat sidecar: %v", err)
+	}
+
+	port := freeTCPPort(t)
+	baseURL := fmt.Sprintf("http://127.0.0.1:%s", port)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Start(ctx, Config{FilePath: file, Port: port})
+	}()
+	waitForReady(t, baseURL)
+
+	if _, err := os.Stat(sidecar); err == nil {
+		t.Fatalf("expected no sidecar for uncommented file after startup, found %s", sidecar)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat sidecar: %v", err)
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("start returned error: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("server did not stop on cancel")
+	}
+}
+
+func TestIntegrationServeDoesNotCreateEmptySidecarOnFileSwitch(t *testing.T) {
+	t.Setenv("AGENTMARK_DATA_DIR", t.TempDir())
+	root := t.TempDir()
+	readme := filepath.Join(root, "README.md")
+	docs := filepath.Join(root, "docs")
+	if err := os.MkdirAll(docs, 0o755); err != nil {
+		t.Fatalf("mkdir docs: %v", err)
+	}
+	if err := os.WriteFile(readme, []byte("# Root\n\n"), 0o644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	other := filepath.Join(docs, "other.md")
+	if err := os.WriteFile(other, []byte("# Other\n\n"), 0o644); err != nil {
+		t.Fatalf("write other: %v", err)
+	}
+	otherSidecar := CommentsPathFor(other)
+	if _, err := os.Stat(otherSidecar); err == nil {
+		t.Fatalf("precondition: other sidecar should not exist")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat: %v", err)
+	}
+
+	port := freeTCPPort(t)
+	baseURL := fmt.Sprintf("http://127.0.0.1:%s", port)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Start(ctx, Config{FilePath: root, Port: port})
+	}()
+	waitForReady(t, baseURL)
+
+	postJSONExpectStatus(t, baseURL+"/api/file/select", map[string]any{
+		"path": "docs/other.md",
+	}, http.StatusOK)
+
+	if _, err := os.Stat(otherSidecar); err == nil {
+		t.Fatalf("expected no sidecar after switching to uncommented file, found %s", otherSidecar)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat sidecar: %v", err)
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("start returned error: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("server did not stop on cancel")
+	}
+}
+
+func TestIntegrationServeRewritesExistingEmptySidecar(t *testing.T) {
+	t.Setenv("AGENTMARK_DATA_DIR", t.TempDir())
+	root := t.TempDir()
+	file := filepath.Join(root, "doc.md")
+	if err := os.WriteFile(file, []byte("# Doc\n\nBody\n"), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+	sidecar := CommentsPathFor(file)
+	emptyJSON := `{"version":1,"threads":[]}` + "\n"
+	if err := os.WriteFile(sidecar, []byte(emptyJSON), 0o644); err != nil {
+		t.Fatalf("write empty sidecar: %v", err)
+	}
+
+	port := freeTCPPort(t)
+	baseURL := fmt.Sprintf("http://127.0.0.1:%s", port)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Start(ctx, Config{FilePath: file, Port: port})
+	}()
+	waitForReady(t, baseURL)
+
+	if _, err := os.Stat(sidecar); err != nil {
+		t.Fatalf("expected existing empty sidecar to remain after startup: %v", err)
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("start returned error: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("server did not stop on cancel")
+	}
+}
+
 func TestIntegrationUpsertThreadWithoutMessageStoresEmptyThreadSlice(t *testing.T) {
 	t.Setenv("AGENTMARK_DATA_DIR", t.TempDir())
 	root := t.TempDir()

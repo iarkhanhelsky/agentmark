@@ -58,9 +58,18 @@ func OpenUnresolvedThreadCount(filePath string) (int, error) {
 	return n, nil
 }
 
-// SaveThreads writes threads to the sidecar.
+// SaveThreads writes threads to the sidecar. When threads is empty and the
+// sidecar file does not exist yet, it is a no-op (avoids creating empty
+// sidecars). If the sidecar already exists, an empty threads list is written.
 func SaveThreads(filePath string, threads []CommentThread) error {
 	p := CommentsPathFor(filePath)
+	if len(threads) == 0 {
+		if _, err := os.Stat(p); os.IsNotExist(err) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+	}
 	f := CommentsFile{Version: 1, Threads: threads}
 	raw, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {

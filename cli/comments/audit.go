@@ -34,7 +34,7 @@ func runAudit(pathArg string, strict bool) error {
 		cmdcore.WriteError(err)
 		return cmdcore.ErrAlreadyReported
 	}
-	threads, err := listThreadsForMarkdown(abs, false, false, false, true)
+	threads, err := listThreadsForMarkdown(abs, false, false, false)
 	if err != nil {
 		cmdcore.WriteError(err)
 		return cmdcore.ErrAlreadyReported

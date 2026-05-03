@@ -63,7 +63,7 @@ func runList(pathArg string, f listFlags) error {
 		return filterAwaitingAgentReply(threads)
 	}
 	if !isDir {
-		filtered, err := listThreadsForMarkdown(abs, f.openOnly, f.resolvedOnly, f.detachedOnly, true)
+		filtered, err := listThreadsForMarkdown(abs, f.openOnly, f.resolvedOnly, f.detachedOnly)
 		if err != nil {
 			cmdcore.WriteError(err)
 			return cmdcore.ErrAlreadyReported
@@ -95,7 +95,7 @@ func runList(pathArg string, f listFlags) error {
 	sort.Strings(mdPaths)
 	files := make([]map[string]any, 0)
 	for _, p := range mdPaths {
-		filtered, err := listThreadsForMarkdown(p, f.openOnly, f.resolvedOnly, f.detachedOnly, false)
+		filtered, err := listThreadsForMarkdown(p, f.openOnly, f.resolvedOnly, f.detachedOnly)
 		if err != nil {
 			cmdcore.WriteError(err)
 			return cmdcore.ErrAlreadyReported

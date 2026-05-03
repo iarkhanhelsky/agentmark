@@ -72,8 +72,10 @@ func filterAwaitingAgentReply(threads []gateway.CommentThread) []gateway.Comment
 	return out
 }
 
-// listThreadsForMarkdown loads sidecar, re-anchors against markdown, optionally persists, returns filtered threads.
-func listThreadsForMarkdown(abs string, openOnly, resolvedOnly, detachedOnly, alwaysSave bool) ([]gateway.CommentThread, error) {
+// listThreadsForMarkdown loads sidecar, re-anchors against markdown, persists
+// via SaveThreads (which skips creating a new file when threads is empty), then
+// returns filtered threads.
+func listThreadsForMarkdown(abs string, openOnly, resolvedOnly, detachedOnly bool) ([]gateway.CommentThread, error) {
 	raw, err := os.ReadFile(abs)
 	if err != nil {
 		return nil, err
@@ -85,13 +87,8 @@ func listThreadsForMarkdown(abs string, openOnly, resolvedOnly, detachedOnly, al
 	}
 	snap, _ := gateway.NewSnapshotStore(abs)
 	threads = gateway.ReanchorThreadsWithStore(markdown, threads, snap)
-	sidecar := gateway.CommentsPathFor(abs)
-	_, statErr := os.Stat(sidecar)
-	hadSidecar := statErr == nil
-	if alwaysSave || len(threads) > 0 || hadSidecar {
-		if err := gateway.SaveThreads(abs, threads); err != nil {
-			return nil, err
-		}
+	if err := gateway.SaveThreads(abs, threads); err != nil {
+		return nil, err
 	}
 	return filterCommentThreads(threads, openOnly, resolvedOnly, detachedOnly), nil
 }
